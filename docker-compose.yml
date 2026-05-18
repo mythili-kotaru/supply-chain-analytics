@@ -1,0 +1,115 @@
+# docker-compose.yml
+#
+# WHY docker-compose?
+# We have multiple services that need to talk to each other locally:
+#   - Postgres (with pgvector) — the data layer
+#   - FastMCP server — the tool API layer
+#   - Allocation Agent (FastAPI) — A2A service
+#   - Replenishment Agent (FastAPI) — A2A service
+#
+# docker-compose gives us a single command (`docker-compose up`) to start
+# everything with the right networking, ports, and env vars.
+#
+# In production you'd use Kubernetes or ECS. Locally, compose is the standard.
+
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────────
+  # POSTGRES + PGVECTOR
+  #
+  # WHY pgvector as an extension vs a separate vector DB?
+  # Your supply chain data lives in Postgres already.
+  # pgvector lets you do: WHERE region = 'Southeast' ORDER BY embedding <-> $1
+  # That's a vector similarity search WITH a SQL filter in ONE query.
+  # A separate Pinecone/Qdrant would require two round trips + data sync.
+  #
+  # ankane/pgvector is the official Docker image with pgvector pre-installed.
+  # ─────────────────────────────────────────────
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: supply_chain_postgres
+    environment:
+      POSTGRES_USER: scai
+      POSTGRES_PASSWORD: scai_password
+      POSTGRES_DB: supply_chain
+    ports:
+      - "5432:5432"         # expose so we can connect with psql or DBeaver locally
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # persist data across restarts
+      - ./data/seeds:/docker-entrypoint-initdb.d  # auto-run seed SQL on first start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scai -d supply_chain"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─────────────────────────────────────────────
+  # FASTMCP SERVER
+  #
+  # WHY a separate service and not just functions in the agent?
+  # Central enforcement: RBAC, rate limiting, logging happen here.
+  # Any client (LangGraph, A2A agents, future Claude plugin) calls the same server.
+  # MCP is a protocol (like REST) — the server speaks it, clients consume it.
+  # ─────────────────────────────────────────────
+  mcp_server:
+    build:
+      context: ./mcp_server
+      dockerfile: Dockerfile
+    container_name: supply_chain_mcp
+    environment:
+      DATABASE_URL: postgresql://scai:scai_password@postgres:5432/supply_chain
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MCP_SECRET: ${MCP_SECRET:-dev-secret-change-in-prod}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./mcp_server:/app   # mount source for hot reload during dev
+
+  # ─────────────────────────────────────────────
+  # ALLOCATION AGENT (A2A FastAPI service)
+  #
+  # WHY a separate FastAPI service and not just a LangGraph node?
+  # In a real org, allocation logic might be owned by a different team.
+  # A2A makes it independently deployable, testable, and scalable.
+  # The Supervisor doesn't know the internals — it just sends a task payload
+  # and polls for a result. This is Google's A2A protocol pattern.
+  # ─────────────────────────────────────────────
+  allocation_agent:
+    build:
+      context: ./services/allocation_agent
+      dockerfile: Dockerfile
+    container_name: allocation_agent
+    environment:
+      DATABASE_URL: postgresql://scai:scai_password@postgres:5432/supply_chain
+      MCP_SERVER_URL: http://mcp_server:8000
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────
+  # REPLENISHMENT AGENT (A2A FastAPI service)
+  # ─────────────────────────────────────────────
+  replenishment_agent:
+    build:
+      context: ./services/replenishment_agent
+      dockerfile: Dockerfile
+    container_name: replenishment_agent
+    environment:
+      DATABASE_URL: postgresql://scai:scai_password@postgres:5432/supply_chain
+      MCP_SERVER_URL: http://mcp_server:8000
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    # named volume — Docker manages this, survives `docker-compose down`
+    # use `docker-compose down -v` to also wipe the data (full reset)

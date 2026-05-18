@@ -1,0 +1,138 @@
+// types/index.ts
+// These mirror the exact Postgres schema from 01_schema.sql
+// When the backend API returns data, it will match these shapes exactly.
+
+export type AlertSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+export type ProposalStatus = "pending" | "approved" | "rejected" | "executing" | "done";
+export type ProposalType = "replenishment" | "allocation" | "forecast_tuning";
+
+// ─── Inventory alert (from inventory table) ───────────────────────────
+export interface InventoryAlert {
+  product_id: string;           // e.g. "SKU-008"
+  product_name: string;         // e.g. "Sunscreen SPF50"
+  category: string;             // "skincare" | "haircare" | "cosmetics"
+  location: string;             // "Northeast" | "Southeast" | "West" | "Midwest"
+  stock_level: number;          // current units
+  reorder_point: number;        // trigger threshold
+  max_capacity: number;
+  buffer_units: number;         // stock_level - reorder_point (negative = deficit)
+  capacity_pct: number;         // stock_level / max_capacity * 100
+  status: "CRITICAL" | "LOW" | "OK";
+  last_updated: string;
+}
+
+// ─── Forecast alert (from forecast_metrics table) ─────────────────────
+export interface ForecastAlert {
+  product_id: string;
+  product_name: string;
+  category: string;
+  model_name: string;           // "xgboost_v1"
+  mape: number;                 // 0.2789 = 27.89%
+  mape_pct: number;             // 27.89
+  mae: number;                  // Mean Absolute Error in units
+  hyperparameters: {
+    n_estimators: number;
+    max_depth: number;
+    learning_rate: number;
+  };
+  notes: string;
+  run_date: string;
+}
+
+// ─── AI Proposal (the HITL approval unit) ─────────────────────────────
+export interface Proposal {
+  id: string;                   // UUID
+  type: ProposalType;
+  status: ProposalStatus;
+  severity: AlertSeverity;
+  created_at: string;
+
+  // What triggered this proposal
+  trigger: {
+    product_id: string;
+    product_name: string;
+    location?: string;
+    metric: string;             // "stock_level" | "mape"
+    current_value: number;
+    threshold: number;
+  };
+
+  // What the agent wants to do
+  agent_reasoning: string;      // plain English explanation
+
+  // Type-specific payload
+  replenishment?: {
+    purchase_orders: PurchaseOrder[];
+    total_order_value: number;
+    supplier_name: string;
+    lead_time_days: number;
+    expected_delivery: string;
+  };
+
+  allocation?: {
+    transfers: AllocationTransfer[];
+    total_units: number;
+  };
+
+  forecast_tuning?: {
+    old_params: Record<string, number>;
+    new_params: Record<string, number>;
+    rationale: string;
+    expected_mape_improvement: string;
+  };
+
+  // Trace info (Day 5 — LangSmith)
+  trace_id?: string;
+  latency_ms?: number;
+  nodes_visited?: string[];
+}
+
+export interface PurchaseOrder {
+  po_number: string;
+  product_id: string;
+  product_name: string;
+  location: string;
+  order_quantity: number;
+  unit_price: number;
+  order_value: number;
+  supplier_name: string;
+  lead_time_days: number;
+  expected_delivery: string;
+}
+
+export interface AllocationTransfer {
+  product_id: string;
+  product_name: string;
+  from_location: string;
+  to_location: string;
+  transfer_quantity: number;
+  reason: string;
+}
+
+// ─── Pipeline trace step ───────────────────────────────────────────────
+export interface TraceStep {
+  node: string;                 // "supervisor" | "sql_insights" | etc.
+  started_at: string;
+  duration_ms: number;
+  status: "success" | "error";
+  tool_calls?: {
+    tool: string;
+    latency_ms: number;
+    result_count?: number;
+  }[];
+  output_summary: string;
+}
+
+// ─── Dashboard summary stats ───────────────────────────────────────────
+export interface DashboardStats {
+  critical_alerts: number;
+  pending_approvals: number;
+  approved_today: number;
+  total_po_value_pending: number;
+  avg_mape: number;
+  services: {
+    name: string;
+    status: "healthy" | "degraded" | "down";
+    latency_ms: number;
+  }[];
+}
