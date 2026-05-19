@@ -128,11 +128,10 @@ export interface DashboardStats {
   critical_alerts: number;
   pending_approvals: number;
   approved_today: number;
-  total_po_value_pending: number;
+  po_value_pending: number;
   avg_mape: number;
   services: {
     name: string;
     status: "healthy" | "degraded" | "down";
-    latency_ms: number;
   }[];
 }

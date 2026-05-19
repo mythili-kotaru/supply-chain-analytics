@@ -109,6 +109,33 @@ services:
       postgres:
         condition: service_healthy
 
+  # ─────────────────────────────────────────────
+  # DASHBOARD API (FastAPI service)
+  #
+  # WHY a separate service and not Next.js API routes directly?
+  # Day 3 adds APScheduler background jobs inside this service:
+  #   - 60s loop: scan inventory, auto-generate proposals on violations
+  #   - 5min loop: scan MAPE, auto-generate forecast tuning proposals
+  # Next.js cannot run persistent background jobs (it's serverless per route).
+  # FastAPI runs as a long-lived process, perfect for schedulers.
+  # ─────────────────────────────────────────────
+  dashboard_api:
+    build:
+      context: ./services/dashboard_api
+      dockerfile: Dockerfile
+    container_name: supply_chain_dashboard_api
+    environment:
+      DATABASE_URL: postgresql://scai:scai_password@postgres:5432/supply_chain
+      ALLOCATION_AGENT_URL: http://allocation_agent:8001
+      REPLENISHMENT_AGENT_URL: http://replenishment_agent:8002
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./services/dashboard_api:/app   # hot reload in dev
+
 volumes:
   pgdata:
     # named volume — Docker manages this, survives `docker-compose down`

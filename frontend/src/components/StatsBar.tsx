@@ -47,7 +47,9 @@ export function StatsBar({ stats }: StatsBarProps) {
           PO Value Pending
         </div>
         <p className="text-2xl font-bold text-blue-400">
-          ${(stats.total_po_value_pending / 1000).toFixed(1)}k
+          ${stats.po_value_pending >= 1000
+            ? `${(stats.po_value_pending / 1000).toFixed(1)}k`
+            : stats.po_value_pending.toFixed(0)}
         </p>
         <p className="text-[11px] text-slate-500">awaiting approval</p>
       </div>
@@ -73,7 +75,6 @@ export function StatsBar({ stats }: StatsBarProps) {
             <div key={svc.name} className="flex items-center justify-between">
               <span className="text-[10px] text-slate-400 truncate">{svc.name}</span>
               <div className="flex items-center gap-1">
-                <span className="text-[10px] text-slate-500">{svc.latency_ms}ms</span>
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
                     svc.status === "healthy" ? "bg-emerald-400" : "bg-red-400"
