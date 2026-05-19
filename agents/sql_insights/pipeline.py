@@ -16,7 +16,7 @@ That said, for simple queries, one LLM call could do all three.
 The split is justified when query complexity is high or when you want
 to swap out the SQL layer (e.g., replace raw SQL with Wren Engine).
 
-WREN ENGINE (mentioned in resume):
+WREN ENGINE:
 Wren Engine is a semantic SQL layer. Instead of writing raw SQL, you define
 your data model in semantic terms ("revenue per region") and Wren generates
 the optimized SQL. It also reduces token count because you send semantic
@@ -50,7 +50,7 @@ formatter_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
 # instead of the raw DDL. This reduces token count significantly:
 #   - Raw DDL: ~800 tokens (full CREATE TABLE statements)
 #   - Semantic schema: ~200 tokens (just the meaningful fields)
-# That's the "75% token reduction" claim in your resume.
+
 # ─────────────────────────────────────────────
 SEMANTIC_SCHEMA = """
 Available data for supply chain analytics:

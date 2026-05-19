@@ -14,14 +14,10 @@ The loop:
   4. REPEAT: Check if the proposed change would improve MAPE (simulate)
   5. STOP: After N iterations or when MAPE is acceptable
 
-WHY does this matter for your resume?
-"Autonomous research agent that analyzes forecasting outputs and auto-tunes
-hyperparameters, eliminating manual intervention"
-
-This is exactly what that bullet means in code. The agent doesn't just
-read the MAPE — it reasons about what's causing the error and proposes
-a specific, justified change. Without this, a data scientist would have
-to manually inspect each model and decide what to change.
+This agent implements a research loop that doesn't just read the MAPE —
+it reasons about what's causing the error and proposes a specific, justified
+change. Without this, a data scientist would have to manually inspect each
+model and decide what to change.
 
 MAPE CONCEPTS:
   MAPE = Mean Absolute Percentage Error

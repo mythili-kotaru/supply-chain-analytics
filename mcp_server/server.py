@@ -14,7 +14,6 @@ FastMCP handles:
   - Response serialization back to MCP format
   - SSE (Server-Sent Events) transport for streaming
 
-WHY does this matter for your resume?
 MCP standardizes how AI agents call tools. Any MCP-compatible client
 (Claude, LangChain, LangGraph via langchain-mcp-adapters) can call this
 server without knowing its internals. It's the "USB-C for AI tools" pattern.
