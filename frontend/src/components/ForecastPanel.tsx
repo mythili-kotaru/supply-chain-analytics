@@ -1,90 +1,111 @@
 "use client";
 
-import { TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
+import { TrendingUp, AlertTriangle, Zap } from "lucide-react";
 import type { ForecastAlert } from "@/types";
 
 interface ForecastPanelProps {
   alerts: ForecastAlert[];
 }
 
-function MapeBar({ value, threshold = 15 }: { value: number; threshold?: number }) {
-  const pct = Math.min(100, value);
-  const color =
-    value > 25 ? "#f87171" : value > 15 ? "#fb923c" : "#34d399";
+const MAPE_THRESHOLD = 15;
+
+function mapeColor(mape: number) {
+  if (mape > 25) return { bar: "#f87171", text: "text-red-400",     label: "CRITICAL" };
+  if (mape > 15) return { bar: "#fb923c", text: "text-orange-400",  label: "HIGH"     };
+  return           { bar: "#34d399", text: "text-emerald-400", label: "OK"       };
+}
+
+function MapeBar({ value }: { value: number }) {
+  const pct       = Math.min(100, (value / 50) * 100);
+  const threshPct = (MAPE_THRESHOLD / 50) * 100;
+  const meta      = mapeColor(value);
 
   return (
-    <div className="relative">
-      <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+    <div className="mt-2 mb-1">
+      <div className="relative h-2 bg-slate-800 rounded-full">
         <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${pct}%`, backgroundColor: color }}
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, backgroundColor: meta.bar }}
         />
-        {/* Threshold marker */}
+        {/* Threshold tick — bright white so it's visible against any bar color */}
         <div
-          className="absolute top-0 h-full w-0.5 bg-slate-500"
-          style={{ left: `${threshold}%` }}
+          className="absolute -top-0.5 h-3 w-0.5 bg-white/50 rounded-full"
+          style={{ left: `${threshPct}%` }}
         />
       </div>
-      <div className="flex justify-between mt-0.5">
-        <span className="text-[10px] text-slate-600">0%</span>
-        <span className="text-[10px] text-slate-600">threshold: {threshold}%</span>
-        <span className="text-[10px] text-slate-600">50%</span>
+      <div className="flex justify-between mt-0.5 text-[9px] text-slate-600">
+        <span>0%</span>
+        <span className="text-slate-500">▲ {MAPE_THRESHOLD}% threshold</span>
+        <span>50%</span>
       </div>
     </div>
   );
 }
 
 export function ForecastPanel({ alerts }: ForecastPanelProps) {
+  const criticalCount = alerts.filter((a) => a.mape_pct > 25).length;
+
   return (
     <div className="card h-full flex flex-col">
+      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-violet-400" />
           <h2 className="text-sm font-semibold text-white">Forecast Health</h2>
         </div>
-        <span className="badge-high">{alerts.length} above threshold</span>
+        <span className={criticalCount > 0 ? "badge-critical" : "badge-high"}>
+          {alerts.length} above threshold
+        </span>
       </div>
 
       <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60">
-        {alerts.map((alert) => (
-          <div key={alert.product_id} className="px-4 py-3 hover:bg-slate-800/30 transition-colors">
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <div>
-                <p className="text-sm font-medium text-white">{alert.product_name}</p>
-                <p className="text-xs text-slate-500">{alert.model_name} · {alert.run_date}</p>
-              </div>
-              <div className="text-right">
-                <div className="flex items-center gap-1 justify-end">
-                  <AlertTriangle className="w-3.5 h-3.5 text-orange-400" />
-                  <span
-                    className={`text-sm font-bold ${
-                      alert.mape_pct > 25
-                        ? "text-red-400"
-                        : alert.mape_pct > 15
-                        ? "text-orange-400"
-                        : "text-emerald-400"
-                    }`}
-                  >
-                    {alert.mape_pct}%
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-500">MAPE</p>
-              </div>
-            </div>
-
-            <MapeBar value={alert.mape_pct} />
-
-            <p className="text-[11px] text-slate-500 mt-1.5 italic">{alert.notes}</p>
-
-            <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-600">
-              {Object.entries(alert.hyperparameters).map(([k, v]) => (
-                <span key={k}>
-                  <span className="font-mono">{k}</span>={v}
-                </span>
-              ))}
-            </div>
+        {alerts.length === 0 ? (
+          <div className="flex items-center justify-center h-full gap-2 text-slate-500 text-sm">
+            <Zap className="w-4 h-4 text-emerald-400" />
+            All models within threshold
           </div>
-        ))}
+        ) : (
+          alerts.map((alert) => {
+            const meta = mapeColor(alert.mape_pct);
+            return (
+              <div key={alert.product_id} className="px-4 py-3 hover:bg-slate-800/30 transition-colors">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">{alert.product_name}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {alert.model_name} · {alert.run_date}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="flex items-center gap-1 justify-end">
+                      <AlertTriangle className={`w-3 h-3 ${meta.text}`} />
+                      <span className={`text-base font-bold tabular-nums ${meta.text}`}>
+                        {alert.mape_pct}%
+                      </span>
+                    </div>
+                    <span className={`text-[9px] font-semibold ${meta.text} opacity-70`}>
+                      {meta.label}
+                    </span>
+                  </div>
+                </div>
+
+                <MapeBar value={alert.mape_pct} />
+
+                <p className="text-[10px] text-slate-500 italic mt-1 leading-relaxed">{alert.notes}</p>
+
+                {alert.hyperparameters && Object.keys(alert.hyperparameters).length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                    {Object.entries(alert.hyperparameters).map(([k, v]) => (
+                      <span key={k} className="text-[9px] text-slate-600 font-mono">
+                        {k}=<span className="text-slate-500">{String(v)}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

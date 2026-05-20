@@ -55,17 +55,23 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
   return (
     <div
       className={`card overflow-hidden slide-in transition-all ${
-        isPending ? "border-slate-700" : isApproved ? "border-emerald-800/50" : "border-red-900/50"
+        isPending
+          ? proposal.severity === "CRITICAL"
+            ? "border-red-800/40 card-critical-glow"
+            : "border-slate-700"
+          : isApproved
+          ? "border-emerald-800/50"
+          : "border-red-900/50"
       }`}
     >
       {/* Top bar — severity stripe */}
       <div
-        className={`h-0.5 w-full ${
+        className={`h-1 w-full ${
           proposal.severity === "CRITICAL"
-            ? "bg-red-500"
+            ? "bg-gradient-to-r from-red-500 to-red-400"
             : proposal.severity === "HIGH"
-            ? "bg-orange-500"
-            : "bg-yellow-500"
+            ? "bg-gradient-to-r from-orange-500 to-orange-400"
+            : "bg-gradient-to-r from-yellow-500 to-yellow-400"
         }`}
       />
 

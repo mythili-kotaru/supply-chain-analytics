@@ -15,7 +15,6 @@ export interface InventoryAlert {
   stock_level: number;          // current units
   reorder_point: number;        // trigger threshold
   max_capacity: number;
-  buffer_units: number;         // stock_level - reorder_point (negative = deficit)
   capacity_pct: number;         // stock_level / max_capacity * 100
   status: "CRITICAL" | "LOW" | "OK";
   last_updated: string;
@@ -25,16 +24,9 @@ export interface InventoryAlert {
 export interface ForecastAlert {
   product_id: string;
   product_name: string;
-  category: string;
-  model_name: string;           // "xgboost_v1"
-  mape: number;                 // 0.2789 = 27.89%
-  mape_pct: number;             // 27.89
-  mae: number;                  // Mean Absolute Error in units
-  hyperparameters: {
-    n_estimators: number;
-    max_depth: number;
-    learning_rate: number;
-  };
+  model_name: string;
+  mape_pct: number;             // e.g. 27.89 (already multiplied by 100)
+  hyperparameters: Record<string, string | number>;
   notes: string;
   run_date: string;
 }
