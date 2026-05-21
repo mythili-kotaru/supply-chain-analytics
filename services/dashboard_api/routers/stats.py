@@ -19,11 +19,12 @@ from models import DashboardStats, ServiceHealth
 router = APIRouter()
 
 # Internal service URLs — same Docker network
-# We probe the agent-card or root endpoint since /health may not exist
+# We probe /health (or /agent-card for A2A services)
 SERVICES = {
-    "MCP Server":          "http://mcp_server:8000/",
+    "MCP Server":          "http://mcp_server:8000/docs",
     "Allocation Agent":    "http://allocation_agent:8001/agent-card",
     "Replenishment Agent": "http://replenishment_agent:8002/agent-card",
+    "LangGraph Agent":     "http://langgraph_agent:8004/health",   # Day 4
 }
 
 

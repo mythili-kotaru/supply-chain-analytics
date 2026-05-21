@@ -73,10 +73,15 @@ export interface Proposal {
     expected_mape_improvement: string;
   };
 
-  // Trace info (Day 5 — LangSmith)
+  // Trace info
   trace_id?: string;
   latency_ms?: number;
   nodes_visited?: string[];
+
+  // Day 4: LangGraph thread_id — stored once /invoke pauses the graph.
+  // Present when the langgraph_agent service is running.
+  // Used by the approve/reject flow to resume the checkpointed graph.
+  thread_id?: string;
 }
 
 export interface PurchaseOrder {

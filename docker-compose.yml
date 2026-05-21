@@ -1,16 +1,16 @@
 # docker-compose.yml
 #
-# WHY docker-compose?
-# We have multiple services that need to talk to each other locally:
+# Services:
 #   - Postgres (with pgvector) — the data layer
-#   - FastMCP server — the tool API layer
-#   - Allocation Agent (FastAPI) — A2A service
-#   - Replenishment Agent (FastAPI) — A2A service
+#   - FastMCP server (port 8000) — tool API for LangGraph agents
+#   - Allocation Agent (port 8001) — A2A FastAPI service
+#   - Replenishment Agent (port 8002) — A2A FastAPI service
+#   - Dashboard API (port 8003) — proposal CRUD + APScheduler monitor
+#   - LangGraph Agent (port 8004) — supervisor graph /invoke + /resume  [Day 4]
 #
-# docker-compose gives us a single command (`docker-compose up`) to start
-# everything with the right networking, ports, and env vars.
-#
-# In production you'd use Kubernetes or ECS. Locally, compose is the standard.
+# docker-compose gives us a single `docker-compose up` to start everything
+# with correct networking, ports, and env vars.
+# In production you'd use Kubernetes or ECS.
 
 version: "3.9"
 
@@ -128,15 +128,68 @@ services:
       DATABASE_URL: postgresql://scai:scai_password@postgres:5432/supply_chain
       ALLOCATION_AGENT_URL: http://allocation_agent:8001
       REPLENISHMENT_AGENT_URL: http://replenishment_agent:8002
+      LANGGRAPH_AGENT_URL: http://langgraph_agent:8004   # Day 4
     ports:
       - "8003:8003"
     depends_on:
       postgres:
         condition: service_healthy
+      langgraph_agent:
+        condition: service_started   # soft dep — dashboard works even if agent is slow to start
     volumes:
       - ./services/dashboard_api:/app   # hot reload in dev
+
+  # ─────────────────────────────────────────────
+  # LANGGRAPH AGENT SERVICE (Day 4)
+  #
+  # HTTP wrapper around the LangGraph supervisor graph.
+  # Exposes two endpoints:
+  #   POST /invoke — start a new graph run, pause at HITL interrupt
+  #                  returns thread_id stored on the proposal row
+  #   POST /resume — unpause a graph with human decision (approved/rejected)
+  #                  executes A2A actions if approved
+  #
+  # WHY a separate service?
+  #   1. LangGraph runs make OpenAI API calls and A2A HTTP calls — I/O heavy,
+  #      better isolated from the dashboard API's scheduling loop.
+  #   2. Can scale independently as proposal volume grows.
+  #   3. The checkpoint SQLite file lives here — single process, no race conditions.
+  #      (In production: use PostgresSaver for multi-instance checkpoint sharing.)
+  #
+  # The agents/ package is mounted from the repo root so this service
+  # shares the same graph code without duplication.
+  # ─────────────────────────────────────────────
+  langgraph_agent:
+    build:
+      context: ./services/langgraph_agent
+      dockerfile: Dockerfile
+    container_name: supply_chain_langgraph_agent
+    environment:
+      DATABASE_URL: postgresql://scai:scai_password@postgres:5432/supply_chain
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ALLOCATION_AGENT_URL: http://allocation_agent:8001
+      REPLENISHMENT_AGENT_URL: http://replenishment_agent:8002
+      MCP_SERVER_URL: http://mcp_server:8000
+      CHECKPOINT_DB: /tmp/supply_chain_checkpoints.db
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      allocation_agent:
+        condition: service_started
+      replenishment_agent:
+        condition: service_started
+    volumes:
+      - ./services/langgraph_agent:/app   # hot reload in dev
+      - ./agents:/app/agents              # shared agents package from repo root
+      - langgraph_checkpoints:/tmp        # persist SQLite checkpoint DB across restarts
 
 volumes:
   pgdata:
     # named volume — Docker manages this, survives `docker-compose down`
     # use `docker-compose down -v` to also wipe the data (full reset)
+  langgraph_checkpoints:
+    # Persists the SQLite checkpoint DB across container restarts.
+    # This means in-flight HITL approvals survive a langgraph_agent restart.
+    # In production: switch to PostgresSaver (no SQLite, no volume needed).

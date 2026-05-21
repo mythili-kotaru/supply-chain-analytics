@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   CheckCircle2, XCircle, ChevronDown, ChevronUp,
   ShoppingCart, ArrowLeftRight, BarChart2,
-  Clock, Cpu, GitBranch,
+  Clock, Cpu, GitBranch, Loader2, Zap,
 } from "lucide-react";
 import type { Proposal } from "@/types";
 
@@ -12,6 +12,14 @@ interface ProposalCardProps {
   proposal: Proposal;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+}
+
+// ── Day 4: approval result shown after LangGraph resume completes ─────────────
+interface AgentResult {
+  via_langgraph: boolean;
+  nodes_visited: string[];
+  final_message: string;
+  graph_status: string | null;
 }
 
 const TYPE_META = {
@@ -40,16 +48,48 @@ const TYPE_META = {
 
 export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProps) {
   const [expanded, setExpanded] = useState(false);
+
+  // ── Day 4: loading state while LangGraph graph is running ────────────────
+  // approving/rejecting may take 5-30s (OpenAI + A2A polling)
+  const [actionState, setActionState] = useState<
+    "idle" | "approving" | "rejecting" | "done"
+  >("idle");
+  const [agentResult, setAgentResult] = useState<AgentResult | null>(null);
+
   const meta = TYPE_META[proposal.type];
   const Icon = meta.icon;
-  const isPending = proposal.status === "pending";
-  const isApproved = proposal.status === "approved";
+  const isPending = proposal.status === "pending" && actionState === "idle";
+  const isApproved = proposal.status === "approved" || actionState === "done" && agentResult !== null && agentResult.graph_status !== "rejected";
+  const isLoading = actionState === "approving" || actionState === "rejecting";
 
   const timeAgo = (iso: string) => {
     const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
     if (diff < 1) return "just now";
     if (diff < 60) return `${diff}m ago`;
     return `${Math.floor(diff / 60)}h ago`;
+  };
+
+  // ── Day 4: wrap onApprove/onReject to show loading + result ──────────────
+  // The parent's onApprove calls the API and returns the response.
+  // We show a spinner while it's in-flight, then surface the agent result.
+  const handleApprove = async () => {
+    setActionState("approving");
+    try {
+      // onApprove is async — the parent passes the API response back via a
+      // custom event on the proposal element. We call it and await it.
+      await (onApprove as unknown as (id: string) => Promise<AgentResult | void>)(proposal.id);
+    } finally {
+      setActionState("done");
+    }
+  };
+
+  const handleReject = async () => {
+    setActionState("rejecting");
+    try {
+      await (onReject as unknown as (id: string) => Promise<AgentResult | void>)(proposal.id);
+    } finally {
+      setActionState("done");
+    }
   };
 
   return (
@@ -98,10 +138,17 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                 >
                   {proposal.severity}
                 </span>
-                {!isPending && (
+                {/* Day 4: show loading badge while LangGraph runs */}
+                {isLoading && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full border bg-indigo-500/10 text-indigo-400 border-indigo-500/30 flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    {actionState === "approving" ? "Resuming agent…" : "Rejecting…"}
+                  </span>
+                )}
+                {!isPending && !isLoading && (
                   <span
                     className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
-                      isApproved
+                      proposal.status === "approved" || actionState === "done"
                         ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                         : "bg-red-500/10 text-red-400 border-red-500/30"
                     }`}
@@ -150,6 +197,13 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                 {proposal.latency_ms}ms
               </p>
             )}
+            {/* Day 4: show thread_id chip if available */}
+            {proposal.thread_id && (
+              <p className="text-xs text-indigo-600 flex items-center gap-1 justify-end mt-0.5 font-mono">
+                <Zap className="w-3 h-3" />
+                {proposal.thread_id.slice(0, 8)}…
+              </p>
+            )}
           </div>
         </div>
 
@@ -160,6 +214,39 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
             {proposal.agent_reasoning}
           </p>
         </div>
+
+        {/* Day 4: Agent execution result — shown after LangGraph resume completes */}
+        {agentResult && (
+          <div className={`mt-2 p-3 rounded-lg border text-xs ${
+            agentResult.graph_status === "executed"
+              ? "bg-emerald-500/5 border-emerald-500/20"
+              : "bg-slate-800/40 border-slate-700/50"
+          }`}>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Zap className="w-3 h-3 text-indigo-400" />
+              <span className="font-semibold text-indigo-400">LangGraph Result</span>
+              {agentResult.via_langgraph ? (
+                <span className="text-slate-500">(graph executed)</span>
+              ) : (
+                <span className="text-slate-500">(direct update)</span>
+              )}
+            </div>
+            <p className="text-slate-300 leading-relaxed">{agentResult.final_message}</p>
+            {agentResult.nodes_visited.length > 0 && (
+              <div className="flex items-center gap-1.5 mt-2 text-slate-500">
+                <GitBranch className="w-3 h-3" />
+                {agentResult.nodes_visited.map((n, i) => (
+                  <span key={n}>
+                    <span className="font-mono text-slate-400">{n}</span>
+                    {i < agentResult.nodes_visited.length - 1 && (
+                      <span className="text-slate-600 mx-1">→</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Expanded detail */}
         {expanded && (
@@ -277,18 +364,20 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
           </button>
 
           {/* Action buttons */}
-          {isPending && (
+          {isPending && !isLoading && (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => onReject(proposal.id)}
+                onClick={handleReject}
                 className="btn-reject"
+                disabled={isLoading}
               >
                 <XCircle className="w-3.5 h-3.5" />
                 Reject
               </button>
               <button
-                onClick={() => onApprove(proposal.id)}
+                onClick={handleApprove}
                 className="btn-approve"
+                disabled={isLoading}
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 Approve
@@ -296,10 +385,26 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
             </div>
           )}
 
-          {!isPending && (
-            <span className={`text-xs font-medium flex items-center gap-1 ${isApproved ? "text-emerald-400" : "text-red-400"}`}>
-              {isApproved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-              {isApproved ? "Approved & executing" : "Rejected"}
+          {/* Loading state */}
+          {isLoading && (
+            <div className="flex items-center gap-2 text-xs text-indigo-400">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>
+                {actionState === "approving"
+                  ? "Resuming LangGraph — executing action…"
+                  : "Sending rejection to agent…"}
+              </span>
+            </div>
+          )}
+
+          {!isPending && !isLoading && (
+            <span className={`text-xs font-medium flex items-center gap-1 ${
+              proposal.status === "approved" ? "text-emerald-400" : "text-red-400"
+            }`}>
+              {proposal.status === "approved"
+                ? <><CheckCircle2 className="w-3.5 h-3.5" /> Approved &amp; executed</>
+                : <><XCircle className="w-3.5 h-3.5" /> Rejected</>
+              }
             </span>
           )}
         </div>

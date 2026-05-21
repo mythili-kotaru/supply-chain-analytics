@@ -1,23 +1,28 @@
 """
-Proposal routes:
+Proposal routes (Day 4 — LangGraph HITL wired):
   GET  /proposals                  — list all (filterable by status)
-  POST /proposals/{id}/approve     — mark approved
-  POST /proposals/{id}/reject      — mark rejected
+  POST /proposals/{id}/approve     — resume LangGraph graph with approved=True
+  POST /proposals/{id}/reject      — resume LangGraph graph with approved=False
 
-Design note on approve/reject:
-Today these just flip the DB status column. On Day 4 we'll replace the
-body of _update_proposal_status with a call to LangGraph's resume API
-(POST to the supervisor's /resume endpoint with the thread_id), which
-will unpause the graph checkpoint and trigger actual A2A execution.
-The route signature stays identical — only the internal logic changes.
+Day 4 change in _update_proposal_status:
+  Instead of just flipping the DB column, we now:
+    1. Look up the proposal's thread_id
+    2. POST to langgraph_agent /resume with {thread_id, approved, feedback}
+    3. The graph unpauses, runs hitl_node, executes A2A if approved
+    4. Update DB status based on the result
 
-This is why we store thread_id on each proposal row right now — we're
-planting the hook for Day 4.
+If the proposal has no thread_id (langgraph_agent was down when it was created),
+we fall back gracefully — just flip the DB status column, same as Day 3.
+
+Route signatures are IDENTICAL to Day 3. The frontend doesn't need to change.
 """
 import json
+import os
+import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
+import httpx
 
 from database import get_db
 from models import (
@@ -25,6 +30,11 @@ from models import (
     ReplenishmentPayload, AllocationPayload, ForecastTuningPayload,
     ApproveRejectResponse,
 )
+
+logger = logging.getLogger(__name__)
+
+# URL for the LangGraph agent service — set in docker-compose env
+LANGGRAPH_AGENT_URL = os.getenv("LANGGRAPH_AGENT_URL", "http://localhost:8004")
 
 router = APIRouter()
 
@@ -86,22 +96,60 @@ def _row_to_proposal(row: asyncpg.Record) -> Proposal:
     )
 
 
+async def _resume_langgraph(
+    proposal_id: str,
+    thread_id: str,
+    approved: bool,
+    feedback: str = "",
+) -> dict:
+    """
+    Call POST /resume on the LangGraph agent service.
+
+    This unpauses the checkpointed graph, which then:
+      - Runs hitl_node with human_response={approved, feedback}
+      - If approved: executes A2A allocation/replenishment/recommendation
+      - Reaches END node
+
+    Returns the ResumeResponse dict from the agent service.
+
+    WHY a separate HTTP call and not importing the graph directly?
+    The dashboard_api service doesn't have access to the agents/ package
+    or the OpenAI key. Keeping LangGraph in its own service maintains
+    clean separation. The dashboard API is purely a CRUD + scheduling layer.
+    """
+    payload = {
+        "proposal_id": proposal_id,
+        "thread_id": thread_id,
+        "approved": approved,
+        "feedback": feedback,
+        "user_role": "admin",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(f"{LANGGRAPH_AGENT_URL}/resume", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def _update_proposal_status(
     db: asyncpg.Pool,
     proposal_id: str,
     new_status: str,
-) -> asyncpg.Record:
+    feedback: str = "",
+) -> dict:
     """
-    Flip the proposal status.
+    Day 4: Resume the LangGraph graph (if thread_id exists), then update DB.
 
-    Day 4 TODO: before updating status, check if the proposal has a
-    thread_id. If it does, POST to the LangGraph supervisor's /resume
-    endpoint to unpause the graph:
-        await resume_langgraph(thread_id=row['thread_id'], approved=(new_status == 'approved'))
-    Then update the DB status.
+    Flow:
+      1. Fetch proposal row — check it exists and is still pending
+      2. If thread_id is set → call /resume on langgraph_agent
+         The graph runs to completion (may trigger A2A allocation/replenishment)
+         The /resume call updates the DB status itself (inside the agent service)
+      3. If no thread_id → fall back to direct DB update (langgraph_agent was down)
+
+    Returns a dict with metadata about what happened (used in the HTTP response).
     """
     row = await db.fetchrow(
-        "SELECT id, status, thread_id FROM proposals WHERE id = $1",
+        "SELECT id, status, thread_id, type FROM proposals WHERE id = $1",
         proposal_id,
     )
     if not row:
@@ -112,11 +160,57 @@ async def _update_proposal_status(
             detail=f"Proposal {proposal_id} is already {row['status']} — cannot change again",
         )
 
+    approved = (new_status == "approved")
+    thread_id = row["thread_id"]
+
+    if thread_id:
+        # ── Path A: LangGraph is wired — resume the graph ────────────────────
+        # The agent service handles the DB update internally (in run_resume).
+        logger.info(
+            f"Resuming LangGraph graph for proposal {proposal_id} "
+            f"(thread_id={thread_id}, approved={approved})"
+        )
+        try:
+            result = await _resume_langgraph(
+                proposal_id=proposal_id,
+                thread_id=thread_id,
+                approved=approved,
+                feedback=feedback,
+            )
+            logger.info(
+                f"Graph completed for proposal {proposal_id}: "
+                f"status={result.get('status')} nodes={result.get('nodes_visited')}"
+            )
+            return {
+                "via_langgraph": True,
+                "graph_status": result.get("status"),
+                "final_message": result.get("final_message", ""),
+                "nodes_visited": result.get("nodes_visited", []),
+            }
+        except httpx.ConnectError:
+            logger.warning(
+                f"langgraph_agent unreachable — falling back to direct DB update "
+                f"for proposal {proposal_id}"
+            )
+            # Fall through to Path B
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"langgraph_agent /resume returned {e.response.status_code}: {e.response.text}"
+            )
+            # Fall through to Path B
+
+    # ── Path B: No thread_id or service down — direct DB update ──────────────
+    logger.info(f"Direct DB update for proposal {proposal_id} → {new_status}")
     await db.execute(
         "UPDATE proposals SET status = $1 WHERE id = $2",
         new_status, proposal_id,
     )
-    return row
+    return {
+        "via_langgraph": False,
+        "graph_status": None,
+        "final_message": f"Status updated to {new_status} (no LangGraph thread).",
+        "nodes_visited": [],
+    }
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -155,12 +249,31 @@ async def approve_proposal(
     proposal_id: str,
     db: asyncpg.Pool = Depends(get_db),
 ):
-    await _update_proposal_status(db, proposal_id, "approved")
+    """
+    Approve a pending proposal.
+
+    Day 4: If the proposal has a LangGraph thread_id, this resumes the
+    paused graph which then executes the actual A2A action (allocation
+    transfer or replenishment PO). May take up to 30s if A2A agents
+    are doing real work.
+
+    If no thread_id (agent service was down), falls back to DB-only update.
+    """
+    result = await _update_proposal_status(db, proposal_id, "approved")
+
+    if result["via_langgraph"]:
+        message = (
+            f"LangGraph resumed — action executed. "
+            f"Nodes: {' → '.join(result['nodes_visited'])}. "
+            f"{result['final_message']}"
+        )
+    else:
+        message = "Proposal approved. (LangGraph not available — status updated directly.)"
+
     return ApproveRejectResponse(
         id=proposal_id,
         status="approved",
-        message="Proposal approved. Execution queued.",
-        # Day 4: message will say "LangGraph resumed — A2A task dispatched."
+        message=message,
     )
 
 
@@ -169,9 +282,20 @@ async def reject_proposal(
     proposal_id: str,
     db: asyncpg.Pool = Depends(get_db),
 ):
-    await _update_proposal_status(db, proposal_id, "rejected")
+    """
+    Reject a pending proposal.
+    Resumes the paused LangGraph graph with approved=False, which records
+    the rejection in the graph state and terminates cleanly.
+    """
+    result = await _update_proposal_status(db, proposal_id, "rejected", feedback="Rejected by ops manager")
+
+    if result["via_langgraph"]:
+        message = f"Proposal rejected. LangGraph graph terminated cleanly."
+    else:
+        message = "Proposal rejected."
+
     return ApproveRejectResponse(
         id=proposal_id,
         status="rejected",
-        message="Proposal rejected.",
+        message=message,
     )

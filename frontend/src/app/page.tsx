@@ -34,6 +34,7 @@ const EMPTY_STATS: DashboardStats = {
     { name: "MCP Server", status: "down" },
     { name: "Allocation Agent", status: "down" },
     { name: "Replenishment Agent", status: "down" },
+    { name: "LangGraph Agent", status: "down" },   // Day 4
   ],
 };
 
@@ -86,56 +87,49 @@ export default function DashboardPage() {
   }, [loadData]);
 
   // ── Approve handler ───────────────────────────────────────────────────────
-  // Optimistically update UI, then confirm with API.
-  // Day 4: this will also resume the LangGraph checkpoint via thread_id.
+  // Day 4: No longer does an optimistic update — the ProposalCard manages
+  // its own "Resuming agent…" spinner for the duration of the LangGraph run
+  // (which can take 5-30s if A2A agents are doing real work).
+  //
+  // WHY drop optimistic update for Day 4?
+  // The approve call now blocks until the LangGraph graph finishes execution.
+  // Optimistic updates work great for fast calls (<200ms). For a 10s call,
+  // the spinner in the card is better UX — it shows *real* progress status.
+  //
+  // After the graph completes, we refresh the proposal list to get the
+  // updated status from the DB (which the langgraph_agent updated).
   const handleApprove = async (id: string) => {
-    // Optimistic update
-    setProposals((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, status: "approved" } : p))
-    );
-    setStats((prev) => ({
-      ...prev,
-      pending_approvals: Math.max(0, prev.pending_approvals - 1),
-      approved_today: prev.approved_today + 1,
-    }));
-
     try {
-      await api.approveProposal(id);
-    } catch (err) {
-      // Rollback optimistic update on failure
-      console.error("Approve failed:", err);
-      setProposals((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, status: "pending" } : p))
-      );
+      const result = await api.approveProposal(id);
+      // Refresh proposals after LangGraph execution completes
+      const updated = await api.getProposals();
+      setProposals(updated);
       setStats((prev) => ({
         ...prev,
-        pending_approvals: prev.pending_approvals + 1,
-        approved_today: Math.max(0, prev.approved_today - 1),
+        pending_approvals: Math.max(0, prev.pending_approvals - 1),
+        approved_today: prev.approved_today + 1,
       }));
+      return result;
+    } catch (err) {
+      console.error("Approve failed:", err);
+      throw err;
     }
   };
 
   // ── Reject handler ────────────────────────────────────────────────────────
   const handleReject = async (id: string) => {
-    setProposals((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, status: "rejected" } : p))
-    );
-    setStats((prev) => ({
-      ...prev,
-      pending_approvals: Math.max(0, prev.pending_approvals - 1),
-    }));
-
     try {
-      await api.rejectProposal(id);
-    } catch (err) {
-      console.error("Reject failed:", err);
-      setProposals((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, status: "pending" } : p))
-      );
+      const result = await api.rejectProposal(id);
+      const updated = await api.getProposals();
+      setProposals(updated);
       setStats((prev) => ({
         ...prev,
-        pending_approvals: prev.pending_approvals + 1,
+        pending_approvals: Math.max(0, prev.pending_approvals - 1),
       }));
+      return result;
+    } catch (err) {
+      console.error("Reject failed:", err);
+      throw err;
     }
   };
 
