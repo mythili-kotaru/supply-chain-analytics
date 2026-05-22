@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS proposals (
   latency_ms          INT,
   nodes_visited       TEXT[],           -- e.g. ARRAY['supervisor','allocation_replenishment','hitl']
   thread_id           TEXT,             -- LangGraph checkpoint thread_id for resume
+  trace_id            TEXT,             -- LangSmith run UUID
+  trace_url           TEXT,             -- LangSmith run URL for "View Trace →" link
 
   -- Type-specific payloads (only one will be non-null per row)
   replenishment_payload  JSONB,

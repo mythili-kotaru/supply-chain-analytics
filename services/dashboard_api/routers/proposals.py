@@ -90,6 +90,8 @@ def _row_to_proposal(row: asyncpg.Record) -> Proposal:
         latency_ms=row["latency_ms"],
         nodes_visited=list(row["nodes_visited"]) if row["nodes_visited"] else None,
         thread_id=row["thread_id"],
+        trace_id=row["trace_id"] if "trace_id" in row.keys() else None,
+        trace_url=row["trace_url"] if "trace_url" in row.keys() else None,
         replenishment=replenishment,
         allocation=allocation,
         forecast_tuning=forecast_tuning,

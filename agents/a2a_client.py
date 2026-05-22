@@ -33,13 +33,16 @@ In our implementation:
 import asyncio
 import httpx
 import logging
+import os
 import uuid
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-ALLOCATION_AGENT_URL = "http://localhost:8001"    # or allocation_agent:8001 inside Docker
-REPLENISHMENT_AGENT_URL = "http://localhost:8002"
+# Read from env so this works both locally (localhost) and in Docker (service names).
+# docker-compose sets ALLOCATION_AGENT_URL=http://allocation_agent:8001 on langgraph_agent.
+ALLOCATION_AGENT_URL = os.getenv("ALLOCATION_AGENT_URL", "http://localhost:8001")
+REPLENISHMENT_AGENT_URL = os.getenv("REPLENISHMENT_AGENT_URL", "http://localhost:8002")
 
 MAX_POLL_ATTEMPTS = 20
 POLL_INTERVAL_SECONDS = 2

@@ -74,7 +74,8 @@ export interface Proposal {
   };
 
   // Trace info
-  trace_id?: string;
+  trace_id?: string;       // LangSmith run UUID
+  trace_url?: string;      // Direct link to LangSmith run
   latency_ms?: number;
   nodes_visited?: string[];
 

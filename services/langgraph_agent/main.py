@@ -50,13 +50,13 @@ import uuid
 import logging
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional
 
 import asyncpg
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # Command moved between LangGraph minor versions.
 # Try the canonical location first, fall back to langgraph.types.
@@ -82,6 +82,18 @@ for _candidate in [_here] + list(_here.parents):
 from agents.supervisor import build_supervisor_graph
 from agents.state import SupplyChainState
 from langchain_core.messages import HumanMessage, AIMessage
+
+# LangSmith client — only initialized if LANGCHAIN_API_KEY is set.
+# Used to look up the run URL after invoke so we can store it on the proposal.
+_LANGSMITH_ENABLED = bool(os.getenv("LANGCHAIN_API_KEY"))
+_langsmith_client = None
+if _LANGSMITH_ENABLED:
+    try:
+        from langsmith import Client as LangSmithClient
+        _langsmith_client = LangSmithClient()
+        logger.info("LangSmith tracing enabled")
+    except Exception as e:
+        logger.warning(f"LangSmith client init failed: {e} — tracing disabled")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -118,6 +130,8 @@ class InvokeResponse(BaseModel):
     status: str                 # always "paused_at_hitl" on success
     nodes_visited: list[str]
     agent_summary: str          # the AIMessage content before interrupt
+    trace_id: Optional[str] = None    # LangSmith run UUID (None if tracing disabled)
+    trace_url: Optional[str] = None   # Direct link to LangSmith run
 
 
 class ResumeRequest(BaseModel):
@@ -168,6 +182,44 @@ async def update_proposal_status(proposal_id: str, status: str) -> None:
         await conn.close()
 
 
+async def update_proposal_trace_id(proposal_id: str, trace_id: str, trace_url: Optional[str] = None) -> None:
+    """Store the LangSmith run_id and URL on the proposal so the frontend can link to it."""
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute(
+            "UPDATE proposals SET trace_id = $1, trace_url = $2 WHERE id = $3",
+            trace_id, trace_url, proposal_id
+        )
+        logger.info(f"Stored trace_id={trace_id} trace_url={trace_url} on proposal {proposal_id}")
+    finally:
+        await conn.close()
+
+
+def _get_langsmith_trace_url(run_id: str) -> Optional[str]:
+    """
+    Build the LangSmith UI URL for a run.
+
+    LangSmith URL format:
+      https://smith.langchain.com/o/<org_id>/projects/p/<project_id>/r/<run_id>
+
+    The easiest approach: use the client to read the run and get the URL directly.
+    Falls back to constructing a generic URL if the API call fails.
+
+    WHY not just construct it? The org slug and project UUID are not in the env var.
+    langsmith.Client().read_run() returns a Run object with a .url attribute.
+    """
+    if not _langsmith_client:
+        return None
+    try:
+        run = _langsmith_client.read_run(run_id)
+        return run.url
+    except Exception as e:
+        logger.warning(f"Could not fetch LangSmith run URL for {run_id}: {e}")
+        # Fallback: generic project URL (user can find the run manually)
+        project = os.getenv("LANGCHAIN_PROJECT", "supply-chain-ai")
+        return f"https://smith.langchain.com/projects/{project}"
+
+
 # ── Core graph runner ─────────────────────────────────────────────────────────
 
 def _build_user_query(req: InvokeRequest) -> str:
@@ -203,12 +255,24 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
     The graph runs until it hits interrupt_before=["hitl"] and pauses.
     Returns the thread_id + a summary of what the agent found.
 
-    WHY SqliteSaver in a thread executor?
-    SqliteSaver uses sqlite3 which is NOT async. We run it in a thread
-    executor to avoid blocking the FastAPI event loop.
+    WHY AsyncSqliteSaver?
+    AsyncSqliteSaver uses aiosqlite under the hood — fully non-blocking.
+    No thread executor needed. The checkpoint DB is written natively on
+    the FastAPI event loop without stalling other requests.
+
+    LANGSMITH RUN_NAME:
+    Setting run_name in the config labels the top-level graph run in LangSmith.
+    Format: "<proposal_type>:<product_name>" e.g. "replenishment:Keratin Treatment Mask"
+    This makes runs easy to find in the LangSmith UI without reading the full trace.
+
+    RUN_ID:
+    We generate a deterministic run_id (uuid4) and pass it in the config.
+    LangGraph uses it as the root run's ID, so we can look it up in LangSmith
+    immediately after the graph pauses.
     """
     thread_id = str(uuid.uuid4())
-    session_id = thread_id  # use same value for both
+    run_id = str(uuid.uuid4())   # pinned run ID so we can look it up in LangSmith
+    session_id = thread_id
 
     user_query = _build_user_query(req)
 
@@ -220,7 +284,6 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
         "human_approved": None,
         "tuning_iterations": 0,
         "error": None,
-        # Pre-populate parsed_intent so routing nodes have product context
         "parsed_intent": {
             "product_id": req.product_id,
             "region": req.location,
@@ -228,25 +291,41 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
         },
     }
 
-    config = {"configurable": {"thread_id": thread_id}}
+    # run_name labels the graph run in LangSmith for easy identification.
+    # run_id lets us look up the trace URL right after the graph pauses.
+    run_name = f"{req.proposal_type}:{req.product_name}"
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "run_name": run_name,
+        "run_id": run_id,
+    }
 
-    # Run in thread executor because SqliteSaver is synchronous
-    def _run_sync():
-        with SqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
-            app = build_supervisor_graph(checkpointer=checkpointer)
-            # astream is async — we need to run it in its own event loop
-            # because we're already inside a thread executor here
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(_astream_until_interrupt(app, initial_state, config))
-            finally:
-                loop.close()
+    async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
+        app = build_supervisor_graph(checkpointer=checkpointer)
+        result = await _astream_until_interrupt(app, initial_state, config)
 
-    result = await asyncio.get_event_loop().run_in_executor(None, _run_sync)
-
-    # Persist thread_id on the proposal row
     await update_proposal_thread_id(req.proposal_id, thread_id)
+
+    # ── LangSmith trace URL ───────────────────────────────────────────────────
+    # After the graph pauses, LangSmith has already ingested the run.
+    # We fetch the URL and store it on the proposal so the frontend can link to it.
+    # This is a best-effort call — if LangSmith is unreachable, we skip gracefully.
+    trace_id: Optional[str] = None
+    trace_url: Optional[str] = None
+
+    if _LANGSMITH_ENABLED:
+        try:
+            # Small delay to let LangSmith ingest the run before we read it back
+            await asyncio.sleep(1)
+            trace_url = await asyncio.get_event_loop().run_in_executor(
+                None, _get_langsmith_trace_url, run_id
+            )
+            trace_id = run_id
+            if trace_id:
+                await update_proposal_trace_id(req.proposal_id, trace_id, trace_url)
+            logger.info(f"LangSmith trace URL: {trace_url}")
+        except Exception as e:
+            logger.warning(f"LangSmith trace capture failed (non-fatal): {e}")
 
     return InvokeResponse(
         thread_id=thread_id,
@@ -254,6 +333,8 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
         status="paused_at_hitl",
         nodes_visited=result["nodes_visited"],
         agent_summary=result["agent_summary"],
+        trace_id=trace_id,
+        trace_url=trace_url,
     )
 
 
@@ -314,21 +395,10 @@ async def run_resume(req: ResumeRequest) -> ResumeResponse:
         "feedback": req.feedback,
     }
 
-    def _run_sync():
-        with SqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
-            app = build_supervisor_graph(checkpointer=checkpointer)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    _astream_resume(app, resume_payload, config)
-                )
-            finally:
-                loop.close()
+    async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
+        app = build_supervisor_graph(checkpointer=checkpointer)
+        result = await _astream_resume(app, resume_payload, config)
 
-    result = await asyncio.get_event_loop().run_in_executor(None, _run_sync)
-
-    # Update proposal status in DB
     new_status = "approved" if req.approved else "rejected"
     await update_proposal_status(req.proposal_id, new_status)
 
@@ -465,28 +535,21 @@ async def get_thread_state(thread_id: str):
     Inspect the current state of a checkpointed graph thread.
     Useful for debugging — see what state the graph is in right now.
     """
-    def _get_sync():
-        with SqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
+    try:
+        async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
             app_graph = build_supervisor_graph(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": thread_id}}
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                state = loop.run_until_complete(app_graph.aget_state(config))
-                return state
-            finally:
-                loop.close()
+            state = await app_graph.aget_state(config)
 
-    try:
-        state = await asyncio.get_event_loop().run_in_executor(None, _get_sync)
-        if state is None:
+        if state is None or not state.values:
             raise HTTPException(status_code=404, detail=f"No checkpoint found for thread_id={thread_id}")
+
         return {
             "thread_id": thread_id,
             "next": list(state.next),
             "values": {
                 k: v for k, v in state.values.items()
-                if k not in ("messages",)   # skip large message list
+                if k not in ("messages",)
             }
         }
     except HTTPException:

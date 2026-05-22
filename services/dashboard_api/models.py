@@ -90,6 +90,8 @@ class Proposal(BaseModel):
     latency_ms: Optional[int] = None
     nodes_visited: Optional[list[str]] = None
     thread_id: Optional[str] = None
+    trace_id: Optional[str] = None      # LangSmith run UUID
+    trace_url: Optional[str] = None     # LangSmith run URL for "View Trace →"
     replenishment: Optional[ReplenishmentPayload] = None
     allocation: Optional[AllocationPayload] = None
     forecast_tuning: Optional[ForecastTuningPayload] = None

@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   CheckCircle2, XCircle, ChevronDown, ChevronUp,
   ShoppingCart, ArrowLeftRight, BarChart2,
-  Clock, Cpu, GitBranch, Loader2, Zap,
+  Clock, Cpu, GitBranch, Loader2, Zap, ExternalLink,
 } from "lucide-react";
 import type { Proposal } from "@/types";
 
@@ -204,6 +204,19 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                 {proposal.thread_id.slice(0, 8)}…
               </p>
             )}
+            {/* Day 5: LangSmith trace link */}
+            {proposal.trace_id && (
+              <a
+                href={proposal.trace_url ?? "https://smith.langchain.com"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-violet-500 hover:text-violet-400 flex items-center gap-1 justify-end mt-0.5 transition-colors"
+                title={`LangSmith run: ${proposal.trace_id}`}
+              >
+                <ExternalLink className="w-3 h-3" />
+                View Trace
+              </a>
+            )}
           </div>
         </div>
 
@@ -336,7 +349,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
 
             {/* Trace info */}
             {proposal.nodes_visited && (
-              <div className="flex items-center gap-2 text-xs text-slate-500">
+              <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                 <GitBranch className="w-3 h-3" />
                 <span>Nodes: </span>
                 {proposal.nodes_visited.map((n, i) => (
@@ -348,6 +361,20 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                   </span>
                 ))}
               </div>
+            )}
+            {/* Day 5: LangSmith deep link in expanded section */}
+            {proposal.trace_id && (
+              <a
+                href={proposal.trace_url ?? "https://smith.langchain.com"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors w-fit"
+                title={`LangSmith run ID: ${proposal.trace_id}`}
+              >
+                <ExternalLink className="w-3 h-3" />
+                <span>View full trace in LangSmith</span>
+                <span className="font-mono text-violet-600">{proposal.trace_id.slice(0, 8)}…</span>
+              </a>
             )}
           </div>
         )}
