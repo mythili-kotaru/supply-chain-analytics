@@ -42,6 +42,8 @@ import os
 import uuid
 import json
 import logging
+import httpx
+import asyncpg
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
@@ -52,6 +54,10 @@ from agents.state import SupplyChainState
 from agents.sql_insights.pipeline import run_sql_insights
 from agents.forecasting_analyst.analyst import run_forecasting_analyst
 from agents.a2a_client import trigger_allocation, trigger_replenishment, poll_task
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scai:scai_password@localhost:5432/supply_chain")
+ALLOCATION_AGENT_URL = os.getenv("ALLOCATION_AGENT_URL", "http://localhost:8001")
+REPLENISHMENT_AGENT_URL = os.getenv("REPLENISHMENT_AGENT_URL", "http://localhost:8002")
 
 logger = logging.getLogger(__name__)
 
@@ -243,17 +249,181 @@ async def allocation_replenishment_node(state: SupplyChainState) -> dict:
 # The graph might restart (crash, deploy). The checkpoint means we never
 # lose work — the human can approve hours later and it still resumes correctly.
 # ─────────────────────────────────────────────
+async def _execute_allocation(task_id: str, allocation_result: dict | None = None) -> str:
+    """
+    Day 6: Call the allocation agent's /execute endpoint to apply
+    inventory transfers to the DB after human approval.
+
+    Falls back to /execute-direct (passing data from graph state) if the
+    in-memory task store was cleared by a service restart.
+    """
+    if not task_id and not allocation_result:
+        return "No allocation task to execute."
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Try task-based execute first
+        if task_id:
+            try:
+                resp = await client.post(f"{ALLOCATION_AGENT_URL}/tasks/{task_id}/execute")
+                if resp.status_code == 200:
+                    return resp.json().get("message", "Allocation executed.")
+                logger.warning(f"Allocation task execute returned {resp.status_code} — falling back to direct execute")
+            except Exception as e:
+                logger.warning(f"Allocation task execute failed: {e} — falling back to direct execute")
+
+        # Fallback: send plan data directly from graph state
+        if allocation_result:
+            plan = allocation_result.get("allocation_plan", [])
+            if not plan:
+                return "No allocation transfers to apply."
+            try:
+                resp = await client.post(
+                    f"{ALLOCATION_AGENT_URL}/execute-direct",
+                    json={"allocation_plan": plan}
+                )
+                resp.raise_for_status()
+                return resp.json().get("message", "Allocation executed via direct payload.")
+            except Exception as e:
+                logger.error(f"Allocation direct execute failed: {e}")
+                return f"Allocation execute error: {str(e)}"
+
+    return "Allocation execute: no data available."
+
+
+async def _execute_replenishment(task_id: str, replenishment_result: dict | None = None) -> str:
+    """
+    Day 6: Call the replenishment agent's /execute endpoint to insert
+    purchase orders and update inventory stock levels after human approval.
+
+    Falls back to /execute-direct (passing data from graph state) if the
+    in-memory task store was cleared by a service restart.
+    """
+    if not task_id and not replenishment_result:
+        return "No replenishment task to execute."
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Try task-based execute first
+        if task_id:
+            try:
+                resp = await client.post(f"{REPLENISHMENT_AGENT_URL}/tasks/{task_id}/execute")
+                if resp.status_code == 200:
+                    return resp.json().get("message", "Replenishment executed.")
+                logger.warning(f"Replenishment task execute returned {resp.status_code} — falling back to direct execute")
+            except Exception as e:
+                logger.warning(f"Replenishment task execute failed: {e} — falling back to direct execute")
+
+        # Fallback: send PO data directly from graph state
+        if replenishment_result:
+            pos = replenishment_result.get("purchase_orders", [])
+            if not pos:
+                return "No purchase orders to apply."
+            try:
+                resp = await client.post(
+                    f"{REPLENISHMENT_AGENT_URL}/execute-direct",
+                    json={"purchase_orders": pos}
+                )
+                resp.raise_for_status()
+                return resp.json().get("message", "Replenishment executed via direct payload.")
+            except Exception as e:
+                logger.error(f"Replenishment direct execute failed: {e}")
+                return f"Replenishment execute error: {str(e)}"
+
+    return "Replenishment execute: no data available."
+
+
+async def _execute_forecast_tuning(state: SupplyChainState) -> str:
+    """
+    Day 6: Apply approved hyperparameter changes to the forecast_metrics table
+    and log the change in hyperparameter_tuning_log.
+    """
+    proposed = state.get("proposed_tuning")
+    if not proposed:
+        return "No forecast tuning changes to apply."
+
+    try:
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            # Update hyperparameters on the most recent model run for this product
+            worst = state.get("worst_performers", [])
+            product_id = worst[0].get("product_id") if worst else None
+
+            if product_id and proposed.get("new_params"):
+                import json as _json
+                new_params = _json.dumps(proposed["new_params"])
+                old_params = _json.dumps(proposed.get("old_params", {}))
+
+                # Update forecast_metrics
+                await conn.execute("""
+                    UPDATE forecast_metrics
+                    SET hyperparameters = $1::jsonb
+                    WHERE product_id = $2
+                    AND run_date = (
+                        SELECT MAX(run_date) FROM forecast_metrics WHERE product_id = $2
+                    )
+                """, new_params, product_id)
+
+                # Log the change
+                await conn.execute("""
+                    INSERT INTO hyperparameter_tuning_log
+                        (product_id, old_params, new_params, rationale, status)
+                    VALUES ($1, $2::jsonb, $3::jsonb, $4, 'approved')
+                """,
+                    product_id,
+                    old_params,
+                    new_params,
+                    proposed.get("rationale", "Approved via HITL dashboard")
+                )
+
+                return (
+                    f"Hyperparameters updated for {product_id}. "
+                    f"Expected MAPE improvement: {proposed.get('expected_mape_improvement', 'N/A')}."
+                )
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"Forecast tuning execute failed: {e}")
+        return f"Forecast tuning execute error: {str(e)}"
+
+    return "No changes applied."
+
+
 async def hitl_node(state: SupplyChainState) -> dict:
     """
-    Pause and wait for human approval before taking any 'action'
-    (submitting recommendations, triggering allocation/replenishment).
+    Pause and wait for human approval before taking any 'action'.
+
+    Day 6 addition: after approval, call the appropriate execute function
+    to actually write changes to the database.
     """
-    # If already approved, skip the interrupt
+    # If already approved (graph is resuming after interrupt), execute the action
     if state.get("human_approved") is not None:
         if state["human_approved"]:
-            return {"next_action": "done", "messages": [AIMessage(content="Action approved and executed.")]}
+            # ── Day 6: Execute DB writes ──────────────────────────────────────
+            execution_messages = []
+
+            alloc_task_id = state.get("allocation_task_id")
+            replen_task_id = state.get("replenishment_task_id")
+            intent = state.get("parsed_intent", {}).get("query_type", "")
+
+            if alloc_task_id or state.get("allocation_result"):
+                msg = await _execute_allocation(alloc_task_id, state.get("allocation_result"))
+                execution_messages.append(f"Allocation: {msg}")
+
+            if replen_task_id or state.get("replenishment_result"):
+                msg = await _execute_replenishment(replen_task_id, state.get("replenishment_result"))
+                execution_messages.append(f"Replenishment: {msg}")
+
+            if intent == "forecast_tuning" or state.get("proposed_tuning"):
+                msg = await _execute_forecast_tuning(state)
+                execution_messages.append(f"Forecast tuning: {msg}")
+
+            summary = " | ".join(execution_messages) if execution_messages else "Action approved and executed."
+            return {
+                "next_action": "done",
+                "messages": [AIMessage(content=summary)]
+            }
         else:
-            return {"next_action": "done", "messages": [AIMessage(content=f"Action rejected. Reason: {state.get('human_feedback', 'No reason given')}.")]}
+            return {
+                "next_action": "done",
+                "messages": [AIMessage(content=f"Action rejected. Reason: {state.get('human_feedback', 'No reason given')}.")]
+            }
 
     # Prepare the approval request payload — shown to the human
     approval_request = {
@@ -264,19 +434,16 @@ async def hitl_node(state: SupplyChainState) -> dict:
         "message": "Review the proposed action and approve or reject."
     }
 
-    # THIS IS THE KEY LINE: interrupt() pauses the graph here.
-    # The dict passed to interrupt() is sent back to the caller.
-    # When the graph resumes, human_response is the value passed back in.
+    # Pause the graph here — resumes when human sends Command(resume=...)
     human_response = interrupt(approval_request)
 
-    # When we get here, the human has responded
     approved = human_response.get("approved", False)
     feedback = human_response.get("feedback", "")
 
     return {
         "human_approved": approved,
         "human_feedback": feedback,
-        "next_action": "done" if approved else "done"
+        "next_action": "done"
     }
 
 

@@ -240,6 +240,119 @@ async def compute_allocation(task_id: str, product_id: str | None, region: str |
         tasks[task_id]["error"] = str(e)
 
 
+# ─────────────────────────────────────────────
+# POST /tasks/{task_id}/execute
+#
+# Day 6: Actually apply the allocation plan to the inventory table.
+# Called by the supervisor hitl_node AFTER human approval.
+#
+# For each transfer in the plan:
+#   - Subtract units from the surplus (from_location)
+#   - Add units to the deficit (to_location)
+#
+# WHY not do this in compute_allocation?
+# Separation of concerns: the compute step is read-only (safe to retry).
+# The execute step is destructive (writes to DB) — it should only run
+# once, after explicit human approval.
+# ─────────────────────────────────────────────
+class ExecuteDirectRequest(BaseModel):
+    """
+    Allows the supervisor to pass allocation transfers directly from graph state.
+    Used when the in-memory task store has been cleared (e.g. after service restart).
+    """
+    allocation_plan: list[dict]
+
+
+@app.post("/execute-direct")
+async def execute_direct(req: ExecuteDirectRequest):
+    """
+    Execute allocation transfers passed directly in the request body.
+    Called by the supervisor when the task_id is no longer in memory.
+    """
+    return await _apply_allocation_plan(req.allocation_plan)
+
+
+@app.post("/tasks/{task_id}/execute")
+async def execute_task(task_id: str):
+    """
+    Apply the allocation plan from a completed task to the inventory table.
+    Only callable after the task is in 'completed' status.
+    """
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    task = tasks[task_id]
+    if task["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task {task_id} is not completed (status={task['status']})"
+        )
+
+    result = task.get("result", {})
+    allocation_plan = result.get("allocation_plan", [])
+
+    if not allocation_plan:
+        return {"executed": 0, "message": "No transfers to apply."}
+
+    result = await _apply_allocation_plan(allocation_plan)
+    tasks[task_id]["status"] = "executed"
+    tasks[task_id]["executed_at"] = datetime.utcnow().isoformat()
+    return result
+
+
+async def _apply_allocation_plan(allocation_plan: list) -> dict:
+    """
+    Core DB logic: apply inventory transfers for each item in the allocation plan.
+    Shared by both /tasks/{id}/execute and /execute-direct.
+    """
+    if not allocation_plan:
+        return {"executed": 0, "message": "No transfers to apply."}
+
+    executed = 0
+    errors = []
+
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        for transfer in allocation_plan:
+            product_id = transfer["product_id"]
+            from_loc = transfer["from_location"]
+            to_loc = transfer["to_location"]
+            qty = transfer["transfer_quantity"]
+
+            try:
+                async with conn.transaction():
+                    # Deduct from surplus location
+                    await conn.execute("""
+                        UPDATE inventory
+                        SET stock_level = stock_level - $1, last_updated = NOW()
+                        WHERE product_id = $2 AND location = $3
+                    """, qty, product_id, from_loc)
+
+                    # Add to deficit location
+                    await conn.execute("""
+                        UPDATE inventory
+                        SET stock_level = stock_level + $1, last_updated = NOW()
+                        WHERE product_id = $2 AND location = $3
+                    """, qty, product_id, to_loc)
+
+                    executed += 1
+                    logger.info(
+                        f"Executed transfer: {qty} units of {product_id} "
+                        f"{from_loc} → {to_loc}"
+                    )
+            except Exception as e:
+                errors.append(f"{product_id} {from_loc}→{to_loc}: {str(e)}")
+                logger.error(f"Transfer failed: {e}")
+    finally:
+        await conn.close()
+
+    return {
+        "executed": executed,
+        "errors": errors,
+        "message": f"Applied {executed} of {len(allocation_plan)} transfers to inventory."
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)

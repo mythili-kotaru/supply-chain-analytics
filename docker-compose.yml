@@ -34,7 +34,7 @@ services:
       POSTGRES_PASSWORD: scai_password
       POSTGRES_DB: supply_chain
     ports:
-      - "5432:5432"         # expose so we can connect with psql or DBeaver locally
+      - "5439:5432"         # expose on 5439 to avoid collision with any local postgres on 5432
     volumes:
       - pgdata:/var/lib/postgresql/data   # persist data across restarts
       - ./data/seeds:/docker-entrypoint-initdb.d  # auto-run seed SQL on first start

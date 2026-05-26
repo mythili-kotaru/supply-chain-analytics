@@ -83,6 +83,10 @@ from agents.supervisor import build_supervisor_graph
 from agents.state import SupplyChainState
 from langchain_core.messages import HumanMessage, AIMessage
 
+# Initialize logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
 # LangSmith client — only initialized if LANGCHAIN_API_KEY is set.
 # Used to look up the run URL after invoke so we can store it on the proposal.
 _LANGSMITH_ENABLED = bool(os.getenv("LANGCHAIN_API_KEY"))
@@ -94,9 +98,6 @@ if _LANGSMITH_ENABLED:
         logger.info("LangSmith tracing enabled")
     except Exception as e:
         logger.warning(f"LangSmith client init failed: {e} — tracing disabled")
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scai:scai_password@localhost:5432/supply_chain")
 
