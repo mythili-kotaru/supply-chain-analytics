@@ -83,7 +83,6 @@ from agents.supervisor import build_supervisor_graph
 from agents.state import SupplyChainState
 from langchain_core.messages import HumanMessage, AIMessage
 
-# Initialize logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -183,6 +182,68 @@ async def update_proposal_status(proposal_id: str, status: str) -> None:
         await conn.close()
 
 
+async def update_proposal_replenishment_payload(proposal_id: str, replenishment_result: dict) -> None:
+    """
+    Write the replenishment agent's result back to replenishment_payload
+    so the dashboard shows real PO data instead of the empty placeholder.
+    """
+    import json as _json
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute(
+            "UPDATE proposals SET replenishment_payload = $1::jsonb WHERE id = $2",
+            _json.dumps(replenishment_result),
+            proposal_id
+        )
+        logger.info(f"Stored replenishment payload on proposal {proposal_id}")
+    finally:
+        await conn.close()
+
+
+async def update_proposal_allocation_payload(proposal_id: str, allocation_result: dict) -> None:
+    """
+    Write the allocation agent's result back to allocation_payload
+    so the dashboard shows real transfer data instead of null.
+    """
+    import json as _json
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute(
+            "UPDATE proposals SET allocation_payload = $1::jsonb WHERE id = $2",
+            _json.dumps(allocation_result),
+            proposal_id
+        )
+        logger.info(f"Stored allocation payload on proposal {proposal_id}")
+    finally:
+        await conn.close()
+
+
+async def update_proposal_forecast_payload(proposal_id: str, proposed_tuning: dict) -> None:
+    """
+    Write the forecasting agent's proposed_tuning back to forecast_tuning_payload
+    so the dashboard can display the actual parameter changes for human review.
+    """
+    import json as _json
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute(
+            """UPDATE proposals
+               SET forecast_tuning_payload = forecast_tuning_payload || $1::jsonb
+               WHERE id = $2""",
+            _json.dumps({
+                "new_params":                proposed_tuning.get("new_params", {}),
+                "old_params":                proposed_tuning.get("old_params", {}),
+                "rationale":                 proposed_tuning.get("rationale", ""),
+                "root_cause":                proposed_tuning.get("root_cause", ""),
+                "expected_mape_improvement": proposed_tuning.get("expected_mape_improvement", ""),
+            }),
+            proposal_id
+        )
+        logger.info(f"Stored forecast tuning payload on proposal {proposal_id}")
+    finally:
+        await conn.close()
+
+
 async def update_proposal_trace_id(proposal_id: str, trace_id: str, trace_url: Optional[str] = None) -> None:
     """Store the LangSmith run_id and URL on the proposal so the frontend can link to it."""
     conn = await asyncpg.connect(DATABASE_URL)
@@ -196,29 +257,46 @@ async def update_proposal_trace_id(proposal_id: str, trace_id: str, trace_url: O
         await conn.close()
 
 
-def _get_langsmith_trace_url(run_id: str) -> Optional[str]:
+def _get_langsmith_trace_url(run_name: str) -> tuple[Optional[str], Optional[str]]:
     """
-    Build the LangSmith UI URL for a run.
+    Find the most recent LangSmith run matching run_name and return (run_id, url).
 
-    LangSmith URL format:
-      https://smith.langchain.com/o/<org_id>/projects/p/<project_id>/r/<run_id>
+    WHY search by run_name instead of run_id?
+    LangGraph does NOT honour a run_id passed in the config — it generates its own
+    internal run ID. So our pinned run_id is never registered in LangSmith and
+    read_run(run_id) always fails with 404.
 
-    The easiest approach: use the client to read the run and get the URL directly.
-    Falls back to constructing a generic URL if the API call fails.
+    Instead we search the project for runs with our run_name (which LangGraph DOES
+    pass through) and take the most recent one. Since run_name includes both the
+    proposal type and product name (e.g. "replenishment:Keratin Treatment Mask"),
+    collisions are extremely unlikely.
 
-    WHY not just construct it? The org slug and project UUID are not in the env var.
-    langsmith.Client().read_run() returns a Run object with a .url attribute.
+    Returns (run_id, url) tuple — both None if not found.
     """
     if not _langsmith_client:
-        return None
+        return None, None
     try:
-        run = _langsmith_client.read_run(run_id)
-        return run.url
-    except Exception as e:
-        logger.warning(f"Could not fetch LangSmith run URL for {run_id}: {e}")
-        # Fallback: generic project URL (user can find the run manually)
         project = os.getenv("LANGCHAIN_PROJECT", "supply-chain-ai")
-        return f"https://smith.langchain.com/projects/{project}"
+        runs = list(_langsmith_client.list_runs(
+            project_name=project,
+            run_type="chain",
+            filter=f'eq(name, "{run_name}")',
+            limit=1,
+        ))
+        if runs:
+            run = runs[0]
+            run_id = str(run.id)
+            url = getattr(run, "url", None)
+            if not url:
+                url = f"https://smith.langchain.com/runs/{run_id}"
+            logger.info(f"Found LangSmith run: id={run_id} url={url}")
+            return run_id, url
+        else:
+            logger.warning(f"No LangSmith run found for name='{run_name}'")
+            return None, None
+    except Exception as e:
+        logger.warning(f"LangSmith run lookup failed for '{run_name}': {e}")
+        return None, None
 
 
 # ── Core graph runner ─────────────────────────────────────────────────────────
@@ -272,7 +350,6 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
     immediately after the graph pauses.
     """
     thread_id = str(uuid.uuid4())
-    run_id = str(uuid.uuid4())   # pinned run ID so we can look it up in LangSmith
     session_id = thread_id
 
     user_query = _build_user_query(req)
@@ -293,12 +370,11 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
     }
 
     # run_name labels the graph run in LangSmith for easy identification.
-    # run_id lets us look up the trace URL right after the graph pauses.
+    # We look it up by run_name after the graph pauses (run_id in config is ignored by LangGraph).
     run_name = f"{req.proposal_type}:{req.product_name}"
     config = {
         "configurable": {"thread_id": thread_id},
         "run_name": run_name,
-        "run_id": run_id,
     }
 
     async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
@@ -306,6 +382,27 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
         result = await _astream_until_interrupt(app, initial_state, config)
 
     await update_proposal_thread_id(req.proposal_id, thread_id)
+
+    # ── Write agent results back to proposal payload columns ─────────────────
+    # The graph nodes compute results and store them in graph state only.
+    # Write them back to the DB so the dashboard shows real data.
+    if req.proposal_type == "forecast_tuning" and result.get("proposed_tuning"):
+        try:
+            await update_proposal_forecast_payload(req.proposal_id, result["proposed_tuning"])
+        except Exception as e:
+            logger.warning(f"Failed to write forecast payload (non-fatal): {e}")
+
+    if req.proposal_type == "replenishment" and result.get("replenishment_result"):
+        try:
+            await update_proposal_replenishment_payload(req.proposal_id, result["replenishment_result"])
+        except Exception as e:
+            logger.warning(f"Failed to write replenishment payload (non-fatal): {e}")
+
+    if req.proposal_type == "allocation" and result.get("allocation_result"):
+        try:
+            await update_proposal_allocation_payload(req.proposal_id, result["allocation_result"])
+        except Exception as e:
+            logger.warning(f"Failed to write allocation payload (non-fatal): {e}")
 
     # ── LangSmith trace URL ───────────────────────────────────────────────────
     # After the graph pauses, LangSmith has already ingested the run.
@@ -316,15 +413,18 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
 
     if _LANGSMITH_ENABLED:
         try:
-            # Small delay to let LangSmith ingest the run before we read it back
-            await asyncio.sleep(1)
-            trace_url = await asyncio.get_event_loop().run_in_executor(
-                None, _get_langsmith_trace_url, run_id
+            # Wait for LangSmith to ingest the run before we search for it.
+            # 3s is enough in practice; the graph itself takes 2-5s so ingestion
+            # is usually complete by the time we get here.
+            await asyncio.sleep(3)
+            trace_id, trace_url = await asyncio.get_event_loop().run_in_executor(
+                None, _get_langsmith_trace_url, run_name
             )
-            trace_id = run_id
             if trace_id:
                 await update_proposal_trace_id(req.proposal_id, trace_id, trace_url)
-            logger.info(f"LangSmith trace URL: {trace_url}")
+                logger.info(f"LangSmith trace stored: id={trace_id} url={trace_url}")
+            else:
+                logger.warning(f"LangSmith trace not found for run_name='{run_name}'")
         except Exception as e:
             logger.warning(f"LangSmith trace capture failed (non-fatal): {e}")
 
@@ -348,6 +448,9 @@ async def _astream_until_interrupt(app, initial_state, config) -> dict:
     """
     nodes_visited = []
     last_ai_message = "Agent analysis in progress."
+    proposed_tuning = None
+    replenishment_result = None
+    allocation_result = None
 
     try:
         async for event in app.astream(initial_state, config=config, stream_mode="updates"):
@@ -365,6 +468,15 @@ async def _astream_until_interrupt(app, initial_state, config) -> dict:
                     if isinstance(msg, AIMessage) and msg.content:
                         last_ai_message = msg.content
                         break
+
+                # Capture agent results to write back to DB
+                if node_output.get("proposed_tuning"):
+                    proposed_tuning = node_output["proposed_tuning"]
+                if node_output.get("replenishment_result"):
+                    replenishment_result = node_output["replenishment_result"]
+                if node_output.get("allocation_result"):
+                    allocation_result = node_output["allocation_result"]
+
     except Exception as e:
         logger.error(f"Graph stream error: {e}", exc_info=True)
         last_ai_message = f"Agent encountered an error: {str(e)}"
@@ -372,6 +484,9 @@ async def _astream_until_interrupt(app, initial_state, config) -> dict:
     return {
         "nodes_visited": nodes_visited,
         "agent_summary": last_ai_message,
+        "proposed_tuning": proposed_tuning,
+        "replenishment_result": replenishment_result,
+        "allocation_result": allocation_result,
     }
 
 

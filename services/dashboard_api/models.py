@@ -66,10 +66,17 @@ class AllocationTransfer(BaseModel):
     to_location: str
     transfer_quantity: int
     reason: str
+    product_id: Optional[str] = None
+    product_name: Optional[str] = None
 
 
 class AllocationPayload(BaseModel):
-    transfers: list[AllocationTransfer]
+    # Supports both old monitor format (transfers) and new agent format (allocation_plan)
+    transfers: Optional[list[AllocationTransfer]] = None
+    allocation_plan: Optional[list[AllocationTransfer]] = None
+    summary: Optional[str] = None
+    total_units_transferred: Optional[int] = None
+    deficits_found: Optional[int] = None
 
 
 class ForecastTuningPayload(BaseModel):
