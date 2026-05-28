@@ -121,6 +121,35 @@ export interface TraceStep {
   output_summary: string;
 }
 
+// ─── Drift detection ───────────────────────────────────────────────────
+
+export interface DriftRecord {
+  id: string;
+  product_id: string;
+  product_name: string;
+  status: string;
+  old_params: Record<string, number>;
+  new_params: Record<string, number>;
+  rationale: string;
+  pre_mape_pct: number | null;
+  post_mape_pct: number | null;
+  mape_delta_pct: number | null;
+  improved: boolean | null;
+  simulated: boolean;
+  evaluated_at: string | null;
+  proposed_at: string | null;
+}
+
+export interface DriftHistory {
+  product_id: string;
+  history: {
+    run_date: string;
+    mape_pct: number;
+    notes: string;
+    hyperparameters: Record<string, number>;
+  }[];
+}
+
 // ─── Dashboard summary stats ───────────────────────────────────────────
 export interface DashboardStats {
   critical_alerts: number;

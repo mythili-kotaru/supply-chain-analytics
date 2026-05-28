@@ -15,6 +15,8 @@ import type {
   ForecastAlert,
   Proposal,
   DashboardStats,
+  DriftRecord,
+  DriftHistory,
 } from "@/types";
 
 // In Next.js, /api/... routes are always relative to the current origin
@@ -62,4 +64,12 @@ export const api = {
       `/proposals/${id}/reject`,
       { method: "POST" }
     ),
+
+  // ── Drift detection ─────────────────────────────────────────────────────────
+
+  getDriftSummary: () =>
+    apiFetch<DriftRecord[]>("/forecast/drift"),
+
+  getDriftHistory: (productId: string) =>
+    apiFetch<DriftHistory>(`/forecast/drift/${productId}`),
 };

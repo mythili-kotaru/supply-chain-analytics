@@ -6,6 +6,7 @@ import { StatsBar } from "@/components/StatsBar";
 import { InventoryAlertsFeed } from "@/components/InventoryAlertsFeed";
 import { ProposalCard } from "@/components/ProposalCard";
 import { ForecastPanel } from "@/components/ForecastPanel";
+import { DriftPanel } from "@/components/DriftPanel";
 import { api } from "@/lib/api";
 import type { Proposal, DashboardStats, InventoryAlert, ForecastAlert } from "@/types";
 import { RefreshCw } from "lucide-react";
@@ -273,6 +274,9 @@ export default function DashboardPage() {
             <ForecastPanel alerts={forecastAlerts} />
           </div>
         </div>
+
+        {/* Drift Detection — full-width section below the 3-col grid */}
+        <DriftPanel />
 
       </main>
     </div>
