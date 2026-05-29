@@ -121,6 +121,29 @@ export interface TraceStep {
   output_summary: string;
 }
 
+// ─── Anomaly detection (Day 9) ─────────────────────────────────────────
+
+export type AnomalyType = "stock_drop" | "demand_spike" | "mape_regression";
+
+export interface AnomalyEvent {
+  id: number;
+  detected_at: string;
+  anomaly_type: AnomalyType;
+  severity: AlertSeverity;
+  product_id: string;
+  product_name: string;
+  location: string | null;
+  metric_name: string;
+  metric_value: number;
+  baseline_value: number;
+  deviation_pct: number;
+  anomaly_score: number;       // 0–1
+  description: string;
+  proposal_id: string | null;
+  acknowledged: boolean;
+  acknowledged_at: string | null;
+}
+
 // ─── Drift detection ───────────────────────────────────────────────────
 
 export interface DriftRecord {

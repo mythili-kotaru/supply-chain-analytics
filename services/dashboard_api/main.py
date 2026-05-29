@@ -27,11 +27,13 @@ from database import create_pool
 from monitor import (
     inventory_monitor,
     forecast_monitor,
+    anomaly_monitor,
     make_sync_job,
     INVENTORY_CHECK_INTERVAL,
     FORECAST_CHECK_INTERVAL,
+    ANOMALY_CHECK_INTERVAL,
 )
-from routers import inventory, forecast, proposals, stats
+from routers import inventory, forecast, proposals, stats, anomaly
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,12 +73,22 @@ async def lifespan(app: FastAPI):
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=10),
     )
 
+    scheduler.add_job(
+        make_sync_job(anomaly_monitor),
+        trigger="interval",
+        seconds=ANOMALY_CHECK_INTERVAL,
+        id="anomaly_monitor",
+        name="Anomaly detection scanner",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=15),
+    )
+
     scheduler.start()
     app.state.scheduler = scheduler
     logger.info(
         f"✓ APScheduler started — "
         f"inventory scan every {INVENTORY_CHECK_INTERVAL}s, "
-        f"MAPE scan every {FORECAST_CHECK_INTERVAL}s"
+        f"MAPE scan every {FORECAST_CHECK_INTERVAL}s, "
+        f"anomaly scan every {ANOMALY_CHECK_INTERVAL}s"
     )
 
     yield  # ← FastAPI serves requests between startup and shutdown
@@ -110,6 +122,7 @@ app.include_router(inventory.router, prefix=PREFIX, tags=["inventory"])
 app.include_router(forecast.router,  prefix=PREFIX, tags=["forecast"])
 app.include_router(proposals.router, prefix=PREFIX, tags=["proposals"])
 app.include_router(stats.router,     prefix=PREFIX, tags=["stats"])
+app.include_router(anomaly.router,   prefix=PREFIX, tags=["anomaly"])
 
 
 @app.get("/health")

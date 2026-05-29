@@ -17,6 +17,7 @@ import type {
   DashboardStats,
   DriftRecord,
   DriftHistory,
+  AnomalyEvent,
 } from "@/types";
 
 // In Next.js, /api/... routes are always relative to the current origin
@@ -72,4 +73,15 @@ export const api = {
 
   getDriftHistory: (productId: string) =>
     apiFetch<DriftHistory>(`/forecast/drift/${productId}`),
+
+  // ── Anomaly detection (Day 9) ───────────────────────────────────────────────
+
+  getAnomalyEvents: (unackedOnly = false) =>
+    apiFetch<AnomalyEvent[]>(`/anomaly/events${unackedOnly ? "?unacked_only=true" : ""}`),
+
+  acknowledgeAnomaly: (id: number) =>
+    apiFetch<{ id: number; acknowledged: boolean }>(`/anomaly/events/${id}/ack`, { method: "POST" }),
+
+  triggerAnomalyScan: () =>
+    apiFetch<{ status: string; summary: Record<string, unknown> }>("/anomaly/scan", { method: "POST" }),
 };

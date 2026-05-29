@@ -138,6 +138,7 @@ services:
         condition: service_started   # soft dep — dashboard works even if agent is slow to start
     volumes:
       - ./services/dashboard_api:/app   # hot reload in dev
+      - ./agents:/app/agents              # shared agents package from repo root
 
   # ─────────────────────────────────────────────
   # LANGGRAPH AGENT SERVICE (Day 4)

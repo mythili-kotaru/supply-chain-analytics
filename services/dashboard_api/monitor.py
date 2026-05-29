@@ -128,6 +128,7 @@ async def trigger_langgraph(
 MAPE_THRESHOLD = 0.15          # 15% — matches ForecastPanel threshold marker
 INVENTORY_CHECK_INTERVAL  = 60    # seconds
 FORECAST_CHECK_INTERVAL   = 300   # seconds (5 min)
+ANOMALY_CHECK_INTERVAL    = 300   # seconds (5 min) — Day 9 anomaly detection
 
 
 # ── Agent reasoning templates ─────────────────────────────────────────────────
@@ -445,6 +446,33 @@ async def forecast_monitor(_pool=None) -> None:
 
     finally:
         await conn.close()
+
+
+# ── Core job: anomaly monitor ─────────────────────────────────────────────────
+
+async def anomaly_monitor(_pool=None) -> None:
+    """
+    Day 9: Run all three anomaly detection rules every 5 minutes.
+    Delegates to agents/anomaly_detector.py which handles deduplication
+    and auto-proposal creation internally.
+    """
+    import sys, pathlib
+    _here = pathlib.Path(__file__).resolve().parent
+    for candidate in [_here] + list(_here.parents):
+        if (candidate / "agents").is_dir():
+            if str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
+            break
+
+    try:
+        from agents.anomaly_detector import run_anomaly_scan
+        summary = await run_anomaly_scan(DATABASE_URL)
+        if summary["total_new"] > 0:
+            logger.info(f"[anomaly] New detections: {summary}")
+        else:
+            logger.info("[anomaly] Anomaly scan: no new anomalies detected.")
+    except Exception as e:
+        logger.error(f"[anomaly] Scan failed: {e}", exc_info=True)
 
 
 # ── APScheduler wrappers ──────────────────────────────────────────────────────
