@@ -26,6 +26,7 @@ import asyncio
 import uuid
 import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Dict, Any
 
@@ -38,13 +39,24 @@ logging.basicConfig(level=logging.INFO)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scai:scai_password@localhost:5432/supply_chain")
 
+tasks: Dict[str, Dict[str, Any]] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.db = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    logger.info("✓ Replenishment agent DB pool created")
+    yield
+    await app.state.db.close()
+    logger.info("✓ Replenishment agent DB pool closed")
+
+
 app = FastAPI(
     title="Replenishment Agent",
     description="A2A agent for generating purchase order recommendations",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
-
-tasks: Dict[str, Dict[str, Any]] = {}
 
 
 @app.get("/agent-card")
@@ -81,7 +93,7 @@ async def create_task(task_input: ReplenishmentTaskInput, background_tasks: Back
         "task_id": task_id,
         "status": "pending",
         "created_at": datetime.utcnow().isoformat(),
-        "input": task_input.dict(),
+        "input": task_input.model_dump(),
         "result": None,
         "error": None
     }
@@ -105,9 +117,7 @@ async def compute_replenishment(task_id: str, product_id: str | None):
     tasks[task_id]["status"] = "in_progress"
 
     try:
-        await asyncio.sleep(2)   # simulate processing time
-
-        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
+        pool = app.state.db
         async with pool.acquire() as conn:
 
             # Get products at stockout risk
@@ -137,8 +147,6 @@ async def compute_replenishment(task_id: str, product_id: str | None):
                 FROM suppliers
                 ORDER BY lead_time_days ASC, defect_rate ASC
             """)
-
-        await pool.close()
 
         best_supplier = dict(suppliers[0]) if suppliers else {
             "supplier_id": "SUP-001",
@@ -263,8 +271,8 @@ async def _apply_purchase_orders(purchase_orders: list) -> dict:
     executed = 0
     errors = []
 
-    conn = await asyncpg.connect(DATABASE_URL)
-    try:
+    pool = app.state.db
+    async with pool.acquire() as conn:
         # Ensure purchase_orders table exists
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS purchase_orders (
@@ -325,8 +333,6 @@ async def _apply_purchase_orders(purchase_orders: list) -> dict:
             except Exception as e:
                 errors.append(f"{po['po_number']}: {str(e)}")
                 logger.error(f"PO execution failed: {e}")
-    finally:
-        await conn.close()
 
     return {
         "executed": executed,

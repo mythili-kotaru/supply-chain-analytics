@@ -10,7 +10,7 @@ on a cold connection.
 """
 import asyncio
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 import asyncpg
 
 from database import get_db
@@ -39,7 +39,7 @@ async def _check_service(name: str, url: str) -> ServiceHealth:
 
 
 @router.get("/stats", response_model=DashboardStats)
-async def get_stats(db: asyncpg.Pool = Depends(get_db)):
+async def get_stats(request: Request, db: asyncpg.Pool = Depends(get_db)):
     # Run DB queries + service health checks concurrently
     (
         critical_row,
@@ -60,6 +60,11 @@ async def get_stats(db: asyncpg.Pool = Depends(get_db)):
         db.fetchrow("SELECT ROUND((AVG(mape) * 100)::numeric, 2) AS avg FROM forecast_metrics"),
         *[_check_service(name, url) for name, url in SERVICES.items()],
     )
+
+    # Check APScheduler background monitor
+    scheduler = request.app.state.scheduler
+    scheduler_status = "healthy" if scheduler.running else "down"
+    service_results.append(ServiceHealth(name="Background Monitors", status=scheduler_status))
 
     return DashboardStats(
         critical_alerts=critical_row["n"],

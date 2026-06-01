@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Navbar } from "@/components/Navbar";
 import { StatsBar } from "@/components/StatsBar";
 import { InventoryAlertsFeed } from "@/components/InventoryAlertsFeed";
@@ -8,9 +8,10 @@ import { ProposalCard } from "@/components/ProposalCard";
 import { ForecastPanel } from "@/components/ForecastPanel";
 import { DriftPanel } from "@/components/DriftPanel";
 import { AnomalyFeed } from "@/components/AnomalyFeed";
+import { useToast } from "@/components/Toast";
 import { api } from "@/lib/api";
 import type { Proposal, DashboardStats, InventoryAlert, ForecastAlert } from "@/types";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 
 // ─────────────────────────────────────────────
 // Day 2: All mock data replaced with real API calls.
@@ -47,10 +48,13 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>(EMPTY_STATS);
 
   const [activeFilter, setActiveFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const { addToast } = useToast();
 
   // ── Load all dashboard data in parallel ──────────────────────────────────
   const loadData = useCallback(async () => {
@@ -103,6 +107,7 @@ export default function DashboardPage() {
   const handleApprove = async (id: string) => {
     try {
       const result = await api.approveProposal(id);
+      addToast("Proposal approved and executed successfully", "success");
       // Refresh proposals after LangGraph execution completes
       const updated = await api.getProposals();
       setProposals(updated);
@@ -114,6 +119,7 @@ export default function DashboardPage() {
       return result;
     } catch (err) {
       console.error("Approve failed:", err);
+      addToast("Failed to approve proposal", "error");
       throw err;
     }
   };
@@ -122,6 +128,7 @@ export default function DashboardPage() {
   const handleReject = async (id: string) => {
     try {
       const result = await api.rejectProposal(id);
+      addToast("Proposal rejected", "info");
       const updated = await api.getProposals();
       setProposals(updated);
       setStats((prev) => ({
@@ -131,6 +138,7 @@ export default function DashboardPage() {
       return result;
     } catch (err) {
       console.error("Reject failed:", err);
+      addToast("Failed to reject proposal", "error");
       throw err;
     }
   };
@@ -141,9 +149,17 @@ export default function DashboardPage() {
     setRefreshing(false);
   };
 
-  const filteredProposals = proposals.filter((p) =>
-    activeFilter === "all" ? true : p.status === activeFilter
-  );
+  const filteredProposals = useMemo(() => {
+    return proposals.filter((p) => {
+      const matchesFilter = activeFilter === "all" ? true : p.status === activeFilter;
+      const q = searchQuery.toLowerCase();
+      const matchesSearch = q === "" || 
+        p.product_name?.toLowerCase().includes(q) || 
+        p.action_type.toLowerCase().includes(q) ||
+        p.location?.toLowerCase().includes(q);
+      return matchesFilter && matchesSearch;
+    });
+  }, [proposals, activeFilter, searchQuery]);
 
   const pendingCount = proposals.filter((p) => p.status === "pending").length;
 
@@ -177,12 +193,21 @@ export default function DashboardPage() {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col">
         <Navbar stats={EMPTY_STATS} />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="flex items-center gap-3 text-slate-400 text-sm">
-            <RefreshCw className="w-4 h-4 animate-spin" />
-            Connecting to Dashboard API...
+        <main className="flex-1 p-4 md:p-6 max-w-[1600px] mx-auto w-full space-y-4">
+          <div className="flex flex-col lg:flex-row gap-4">
+            <div className="skeleton h-24 w-full" />
           </div>
-        </div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[600px]">
+            <div className="lg:col-span-3 skeleton h-[600px]" />
+            <div className="lg:col-span-6 flex flex-col gap-3">
+              <div className="skeleton h-10 w-full" />
+              <div className="skeleton h-40 w-full" />
+              <div className="skeleton h-40 w-full" />
+              <div className="skeleton h-40 w-full" />
+            </div>
+            <div className="lg:col-span-3 skeleton h-[600px]" />
+          </div>
+        </main>
       </div>
     );
   }
@@ -216,8 +241,20 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex items-center gap-2">
+                {/* Search */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search proposals..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:border-slate-600 transition-colors w-40"
+                  />
+                </div>
+
                 {/* Filter tabs */}
-                <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs">
+                <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs hidden sm:flex">
                   {(["all", "pending", "approved", "rejected"] as const).map((f) => (
                     <button
                       key={f}

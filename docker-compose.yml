@@ -11,8 +11,9 @@
 # docker-compose gives us a single `docker-compose up` to start everything
 # with correct networking, ports, and env vars.
 # In production you'd use Kubernetes or ECS.
-
-version: "3.9"
+#
+# DB credentials: read from .env file (see .env.example).
+# Defaults are provided inline for dev convenience, but .env takes precedence.
 
 services:
   # ─────────────────────────────────────────────
@@ -30,9 +31,9 @@ services:
     image: ankane/pgvector:latest
     container_name: supply_chain_postgres
     environment:
-      POSTGRES_USER: scai
-      POSTGRES_PASSWORD: scai_password
-      POSTGRES_DB: supply_chain
+      POSTGRES_USER: ${POSTGRES_USER:-scai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scai_password}
+      POSTGRES_DB: ${POSTGRES_DB:-supply_chain}
     ports:
       - "5439:5432"         # expose on 5439 to avoid collision with any local postgres on 5432
     volumes:

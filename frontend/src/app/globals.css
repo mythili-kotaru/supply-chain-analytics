@@ -21,6 +21,27 @@
   }
 }
 
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer utilities {
+  .animate-slide-up {
+    animation: slide-up 0.3s ease-out forwards;
+  }
+  
+  .skeleton {
+    @apply bg-slate-800 animate-pulse rounded-md;
+  }
+}
+
 @layer components {
   .card {
     @apply bg-slate-900 border border-slate-800 rounded-xl;

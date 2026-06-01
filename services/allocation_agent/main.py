@@ -31,6 +31,7 @@ import asyncio
 import uuid
 import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Any
 
@@ -44,15 +45,36 @@ logging.basicConfig(level=logging.INFO)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scai:scai_password@localhost:5432/supply_chain")
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
 
-app = FastAPI(
-    title="Allocation Agent",
-    description="A2A agent for computing inventory allocation plans",
-    version="1.0.0"
-)
-
 # In-memory task store: task_id → task_state
 # In production: replace with Redis or Postgres
 tasks: Dict[str, Dict[str, Any]] = {}
+
+
+# ─────────────────────────────────────────────
+# LIFESPAN — create/close DB pool once at startup/shutdown
+#
+# WHY a shared pool instead of per-request connections?
+#   1. Connection reuse: asyncpg pools maintain pre-opened connections.
+#      Creating a new connection takes ~5-20ms; acquiring from pool takes ~0.1ms.
+#   2. Bounded resources: max_size=10 prevents exhausting Postgres max_connections
+#      (default 100). Without a cap, under load each request opens a new connection.
+#   3. Health checking: the pool detects broken connections and replaces them.
+# ─────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.db = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    logger.info("✓ Allocation agent DB pool created")
+    yield
+    await app.state.db.close()
+    logger.info("✓ Allocation agent DB pool closed")
+
+
+app = FastAPI(
+    title="Allocation Agent",
+    description="A2A agent for computing inventory allocation plans",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 # ─────────────────────────────────────────────
@@ -110,7 +132,7 @@ async def create_task(task_input: AllocationTaskInput, background_tasks: Backgro
         "task_id": task_id,
         "status": "pending",
         "created_at": datetime.utcnow().isoformat(),
-        "input": task_input.dict(),
+        "input": task_input.model_dump(),
         "result": None,
         "error": None
     }
@@ -154,10 +176,7 @@ async def compute_allocation(task_id: str, product_id: str | None, region: str |
     logger.info(f"Computing allocation for task {task_id}")
 
     try:
-        # Simulate some processing time (replace with real computation)
-        await asyncio.sleep(2)
-
-        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
+        pool = app.state.db
         async with pool.acquire() as conn:
             # Get inventory for all products (or specific product)
             conditions = []
@@ -178,8 +197,6 @@ async def compute_allocation(task_id: str, product_id: str | None, region: str |
                 {where}
                 ORDER BY i.product_id, buffer ASC
             """, *params)
-
-        await pool.close()
 
         inventory = [dict(r) for r in rows]
 
@@ -311,8 +328,8 @@ async def _apply_allocation_plan(allocation_plan: list) -> dict:
     executed = 0
     errors = []
 
-    conn = await asyncpg.connect(DATABASE_URL)
-    try:
+    pool = app.state.db
+    async with pool.acquire() as conn:
         for transfer in allocation_plan:
             product_id = transfer["product_id"]
             from_loc = transfer["from_location"]
@@ -343,8 +360,6 @@ async def _apply_allocation_plan(allocation_plan: list) -> dict:
             except Exception as e:
                 errors.append(f"{product_id} {from_loc}→{to_loc}: {str(e)}")
                 logger.error(f"Transfer failed: {e}")
-    finally:
-        await conn.close()
 
     return {
         "executed": executed,

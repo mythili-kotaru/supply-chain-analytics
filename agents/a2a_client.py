@@ -34,6 +34,7 @@ import asyncio
 import httpx
 import logging
 import os
+import random
 import uuid
 from datetime import datetime
 
@@ -45,7 +46,35 @@ ALLOCATION_AGENT_URL = os.getenv("ALLOCATION_AGENT_URL", "http://localhost:8001"
 REPLENISHMENT_AGENT_URL = os.getenv("REPLENISHMENT_AGENT_URL", "http://localhost:8002")
 
 MAX_POLL_ATTEMPTS = 20
-POLL_INTERVAL_SECONDS = 2
+POLL_BASE_INTERVAL = 1.5   # seconds — base for exponential backoff
+POLL_MAX_INTERVAL = 10.0   # cap the backoff
+TRIGGER_MAX_RETRIES = 3    # retries for trigger HTTP calls
+
+
+# ─────────────────────────────────────────────
+# RETRY HELPER
+#
+# Wraps an async HTTP call with exponential backoff + jitter.
+# Used for trigger_* functions where a single transient failure
+# (e.g., service restarting) shouldn't fail the whole proposal.
+# ─────────────────────────────────────────────
+async def _retry_post(client: httpx.AsyncClient, url: str, payload: dict) -> httpx.Response:
+    """POST with exponential backoff retry on transient errors."""
+    for attempt in range(TRIGGER_MAX_RETRIES):
+        try:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            return resp
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            if attempt == TRIGGER_MAX_RETRIES - 1:
+                logger.error(f"All {TRIGGER_MAX_RETRIES} retries exhausted for {url}: {e}")
+                raise
+            wait = (2 ** attempt) + random.uniform(0, 0.5)
+            logger.warning(f"Retry {attempt+1}/{TRIGGER_MAX_RETRIES} for {url} in {wait:.1f}s: {e}")
+            await asyncio.sleep(wait)
+        except httpx.HTTPStatusError:
+            raise  # don't retry 4xx/5xx — those are application-level errors
+    raise RuntimeError("Unreachable")  # satisfies type checker
 
 
 async def trigger_allocation(
@@ -55,6 +84,7 @@ async def trigger_allocation(
 ) -> str:
     """
     Send an allocation task to the Allocation Agent.
+    Retries up to 3 times on transient connection errors.
     Returns the task_id for polling.
     """
     task_id = str(uuid.uuid4())
@@ -68,15 +98,10 @@ async def trigger_allocation(
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.post(f"{ALLOCATION_AGENT_URL}/tasks", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            logger.info(f"Allocation task created: {data.get('task_id')}")
-            return data.get("task_id", task_id)
-        except httpx.RequestError as e:
-            logger.error(f"Failed to reach allocation agent: {e}")
-            raise
+        resp = await _retry_post(client, f"{ALLOCATION_AGENT_URL}/tasks", payload)
+        data = resp.json()
+        logger.info(f"Allocation task created: {data.get('task_id')}")
+        return data.get("task_id", task_id)
 
 
 async def trigger_replenishment(
@@ -85,6 +110,7 @@ async def trigger_replenishment(
 ) -> str:
     """
     Send a replenishment task to the Replenishment Agent.
+    Retries up to 3 times on transient connection errors.
     Returns the task_id for polling.
     """
     task_id = str(uuid.uuid4())
@@ -97,21 +123,16 @@ async def trigger_replenishment(
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.post(f"{REPLENISHMENT_AGENT_URL}/tasks", json=payload)
-            resp.raise_for_status()
-            return resp.json().get("task_id", task_id)
-        except httpx.RequestError as e:
-            logger.error(f"Failed to reach replenishment agent: {e}")
-            raise
+        resp = await _retry_post(client, f"{REPLENISHMENT_AGENT_URL}/tasks", payload)
+        return resp.json().get("task_id", task_id)
 
 
 async def poll_task(agent_type: str, task_id: str) -> dict | None:
     """
     Poll an A2A agent until the task completes or fails.
 
-    Uses linear backoff (POLL_INTERVAL_SECONDS between each attempt).
-    In production: use exponential backoff with jitter to avoid thundering herd.
+    Uses exponential backoff with jitter to avoid thundering herd.
+    Starts at 1.5s, doubles each attempt, caps at 10s.
 
     Args:
         agent_type: 'allocation' or 'replenishment'
@@ -145,7 +166,10 @@ async def poll_task(agent_type: str, task_id: str) -> dict | None:
             except httpx.RequestError as e:
                 logger.warning(f"Poll attempt {attempt+1} failed: {e}")
 
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            # Exponential backoff with jitter: 1.5, 3, 6, 10, 10, ...
+            wait = min(POLL_BASE_INTERVAL * (2 ** attempt), POLL_MAX_INTERVAL)
+            wait += random.uniform(0, 0.5)
+            await asyncio.sleep(wait)
 
     logger.error(f"Task {task_id} timed out after {MAX_POLL_ATTEMPTS} attempts")
     return {"error": "Task timed out", "status": "timeout"}

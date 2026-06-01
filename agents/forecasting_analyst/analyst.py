@@ -56,11 +56,14 @@ MAPE_HIGH_THRESHOLD = 0.15    # >15% = needs attention
 MAX_ITERATIONS = 2            # prevent infinite loops
 
 
+from typing import Optional
+
 async def run_forecasting_analyst(
     query: str,
     session_id: str,
     role: str,
-    iterations: int = 0
+    iterations: int = 0,
+    pool: Optional[asyncpg.Pool] = None,
 ) -> dict:
     """
     Run the forecasting analyst research agent.
@@ -73,24 +76,30 @@ async def run_forecasting_analyst(
     # ─────────────────────────────────────────────
     # STEP 1: OBSERVE — read MAPE metrics from DB
     # ─────────────────────────────────────────────
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
-    async with pool.acquire() as conn:
-        metrics_rows = await conn.fetch("""
-            SELECT
-                fm.product_id,
-                p.product_name,
-                p.category,
-                fm.model_name,
-                fm.mape,
-                fm.mae,
-                fm.hyperparameters,
-                fm.notes,
-                fm.run_date
-            FROM forecast_metrics fm
-            JOIN products p ON fm.product_id = p.product_id
-            ORDER BY fm.mape DESC
-        """)
-    await pool.close()
+    _pool_owner = False
+    if pool is None:
+        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
+        _pool_owner = True
+    try:
+        async with pool.acquire() as conn:
+            metrics_rows = await conn.fetch("""
+                SELECT
+                    fm.product_id,
+                    p.product_name,
+                    p.category,
+                    fm.model_name,
+                    fm.mape,
+                    fm.mae,
+                    fm.hyperparameters,
+                    fm.notes,
+                    fm.run_date
+                FROM forecast_metrics fm
+                JOIN products p ON fm.product_id = p.product_id
+                ORDER BY fm.mape DESC
+            """)
+    finally:
+        if _pool_owner:
+            await pool.close()
 
     metrics = [dict(row) for row in metrics_rows]
 

@@ -578,7 +578,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # Restrict origins to known consumers instead of wildcard.
+    # In production, set ALLOWED_ORIGINS env var to your actual domain(s).
+    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8003").split(","),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -6,6 +6,8 @@ export const metadata: Metadata = {
   description: "Autonomous supply chain monitoring with human-in-the-loop approvals",
 };
 
+import { ToastProvider } from "@/components/Toast";
+
 export default function RootLayout({
   children,
 }: {
@@ -13,7 +15,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body>{children}</body>
+      <body>
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

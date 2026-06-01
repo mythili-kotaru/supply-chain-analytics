@@ -19,6 +19,7 @@ Route signatures are IDENTICAL to Day 3. The frontend doesn't need to change.
 import json
 import os
 import logging
+import re
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
@@ -35,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 # URL for the LangGraph agent service — set in docker-compose env
 LANGGRAPH_AGENT_URL = os.getenv("LANGGRAPH_AGENT_URL", "http://localhost:8004")
+
+# UUID v4 pattern for proposal ID validation
+_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
 
 router = APIRouter()
 
@@ -261,6 +265,8 @@ async def approve_proposal(
 
     If no thread_id (agent service was down), falls back to DB-only update.
     """
+    if not _UUID_RE.match(proposal_id):
+        raise HTTPException(status_code=400, detail="Invalid proposal ID format (expected UUID)")
     result = await _update_proposal_status(db, proposal_id, "approved")
 
     if result["via_langgraph"]:
@@ -289,6 +295,8 @@ async def reject_proposal(
     Resumes the paused LangGraph graph with approved=False, which records
     the rejection in the graph state and terminates cleanly.
     """
+    if not _UUID_RE.match(proposal_id):
+        raise HTTPException(status_code=400, detail="Invalid proposal ID format (expected UUID)")
     result = await _update_proposal_status(db, proposal_id, "rejected", feedback="Rejected by ops manager")
 
     if result["via_langgraph"]:

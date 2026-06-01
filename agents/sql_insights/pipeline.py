@@ -27,6 +27,7 @@ For real Wren integration, you'd call the Wren Engine API.
 
 import os
 import json
+import asyncio
 import asyncpg
 import logging
 from langchain_openai import ChatOpenAI
@@ -89,9 +90,17 @@ RULES:
 """
 
 
-async def run_sql_insights(query: str, role: str) -> dict:
+from typing import Optional
+
+async def run_sql_insights(query: str, role: str, pool: Optional[asyncpg.Pool] = None) -> dict:
     """
     Run the full 3-node SQL insights pipeline.
+
+    Args:
+        query: Natural language question from the user
+        role: User role (analyst/admin)
+        pool: Optional asyncpg pool. If None, creates a temporary one.
+              Pass the shared pool to avoid per-call connection churn.
 
     Returns:
         dict with 'sql_query', 'results', 'insight', 'token_count'
@@ -152,22 +161,50 @@ Intent details: {json.dumps(parsed_intent)}"""),
     # ─────────────────────────────────────────────
     # EXECUTE THE SQL
     #
-    # WHY asyncpg directly and not via MCP?
-    # The SQL insights pipeline runs internally — it's not exposed as an MCP tool.
-    # The MCP server exposes tools for EXTERNAL consumption (other agents, clients).
-    # Internal LangGraph nodes can talk to the DB directly.
-    # This is an intentional design choice: MCP for external API, direct for internal.
+    # SAFETY: The LLM-generated SQL could contain destructive statements
+    # (DROP TABLE, DELETE, etc.) if the model is confused or manipulated.
+    # We defend in depth:
+    #   1. Blocklist: reject known DDL/DML keywords before execution
+    #   2. Read-only transaction: Postgres enforces no writes even if
+    #      our blocklist misses something
+    #   3. Timeout: kill long-running queries after 5 seconds
     # ─────────────────────────────────────────────
+    import re
+
+    BLOCKED_KEYWORDS = re.compile(
+        r'\b(DROP|ALTER|TRUNCATE|DELETE|INSERT|UPDATE|CREATE|GRANT|REVOKE|COPY)\b',
+        re.IGNORECASE,
+    )
+
     results = []
-    try:
-        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql_query)
-            results = [dict(row) for row in rows]
-        await pool.close()
-    except Exception as e:
-        logger.error(f"SQL execution error: {e}")
-        results = []
+    sql_error = None
+    if BLOCKED_KEYWORDS.search(sql_query):
+        sql_error = "Generated SQL contains forbidden DDL/DML statements — rejected for safety."
+        logger.warning(f"SQL BLOCKED: {sql_query[:200]}")
+    else:
+        _pool_owner = False  # track whether we created the pool (and must close it)
+        try:
+            if pool is None:
+                pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
+                _pool_owner = True
+            async with pool.acquire() as conn:
+                # Set a 5-second statement timeout to prevent runaway queries
+                await conn.execute("SET statement_timeout = '5s'")
+                async with conn.transaction(readonly=True):
+                    rows = await conn.fetch(sql_query)
+                    results = [dict(row) for row in rows]
+        except asyncpg.exceptions.ReadOnlySQLTransactionError:
+            sql_error = "Query attempted to modify data — blocked by read-only transaction."
+            logger.warning(f"SQL write attempt blocked: {sql_query[:200]}")
+        except asyncio.TimeoutError:
+            sql_error = "Query timed out after 5 seconds."
+            logger.warning(f"SQL timeout: {sql_query[:200]}")
+        except Exception as e:
+            sql_error = f"SQL execution error: {str(e)}"
+            logger.error(f"SQL execution error for query [{sql_query[:200]}]: {e}")
+        finally:
+            if _pool_owner and pool is not None:
+                await pool.close()
 
     # ─────────────────────────────────────────────
     # NODE 3: RESULTS FORMATTER
@@ -175,7 +212,9 @@ Intent details: {json.dumps(parsed_intent)}"""),
     # Turns raw SQL results into a natural language insight.
     # This is what the user sees in the chat UI.
     # ─────────────────────────────────────────────
-    if not results:
+    if sql_error:
+        insight = f"Could not execute the query: {sql_error}"
+    elif not results:
         insight = "No results found for that query. The data may not match your filters."
     else:
         formatter_response = await formatter_llm.ainvoke([
@@ -191,5 +230,6 @@ Mention specific numbers. Be concise — no bullet points, just prose."""),
         "results": results,
         "insight": insight,
         "parsed_intent": parsed_intent,
-        "result_count": len(results)
+        "result_count": len(results),
+        "error": sql_error,
     }

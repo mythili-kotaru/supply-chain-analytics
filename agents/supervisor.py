@@ -337,98 +337,99 @@ async def _execute_forecast_tuning(state: SupplyChainState) -> str:
     """
     import json as _json
     import random
-    from datetime import datetime, date
+    from datetime import date
 
     proposed = state.get("proposed_tuning")
     if not proposed:
         return "No forecast tuning changes to apply."
 
     try:
-        conn = await asyncpg.connect(DATABASE_URL)
+        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
         try:
-            worst = state.get("worst_performers", [])
-            product_id = worst[0].get("product_id") if worst else None
-            # Fallback: use target_product_id from proposed_tuning
-            if not product_id:
-                product_id = proposed.get("target_product_id")
+            async with pool.acquire() as conn:
+                worst = state.get("worst_performers", [])
+                product_id = worst[0].get("product_id") if worst else None
+                # Fallback: use target_product_id from proposed_tuning
+                if not product_id:
+                    product_id = proposed.get("target_product_id")
 
-            if not product_id or not proposed.get("new_params"):
-                return "No product_id or new_params found — skipping."
+                if not product_id or not proposed.get("new_params"):
+                    return "No product_id or new_params found — skipping."
 
-            new_params = _json.dumps(proposed["new_params"])
-            old_params = _json.dumps(proposed.get("old_params", {}))
+                new_params = _json.dumps(proposed["new_params"])
+                old_params = _json.dumps(proposed.get("old_params", {}))
 
-            # Get current MAPE (pre-tuning)
-            pre_mape_row = await conn.fetchrow("""
-                SELECT mape, model_name FROM forecast_metrics
-                WHERE product_id = $1
-                ORDER BY run_date DESC LIMIT 1
-            """, product_id)
-            pre_mape = float(pre_mape_row["mape"]) if pre_mape_row else None
-            model_name = pre_mape_row["model_name"] if pre_mape_row else "xgboost_v1"
+                # Get current MAPE (pre-tuning)
+                pre_mape_row = await conn.fetchrow("""
+                    SELECT mape, model_name FROM forecast_metrics
+                    WHERE product_id = $1
+                    ORDER BY run_date DESC LIMIT 1
+                """, product_id)
+                pre_mape = float(pre_mape_row["mape"]) if pre_mape_row else None
+                model_name = pre_mape_row["model_name"] if pre_mape_row else "xgboost_v1"
 
-            # Update hyperparameters on the most recent model run
-            await conn.execute("""
-                UPDATE forecast_metrics
-                SET hyperparameters = $1::jsonb
-                WHERE product_id = $2
-                AND run_date = (
-                    SELECT MAX(run_date) FROM forecast_metrics WHERE product_id = $2
-                )
-            """, new_params, product_id)
-
-            # ── Day 7: Drift detection ────────────────────────────────────────
-            # Simulate post-tuning MAPE: apply a random improvement of 5-15%.
-            # In production: re-run the model with new_params on validation data.
-            post_mape = None
-            mape_delta = None
-            if pre_mape is not None:
-                improvement_factor = random.uniform(0.05, 0.15)
-                post_mape = round(pre_mape * (1 - improvement_factor), 4)
-                mape_delta = round(pre_mape - post_mape, 4)
-
-                # Insert a new forecast_metrics row reflecting the post-tuning run
-                today = date.today()
+                # Update hyperparameters on the most recent model run
                 await conn.execute("""
-                    INSERT INTO forecast_metrics
-                        (product_id, model_name, mape, run_date, hyperparameters, notes)
-                    VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-                    ON CONFLICT DO NOTHING
+                    UPDATE forecast_metrics
+                    SET hyperparameters = $1::jsonb
+                    WHERE product_id = $2
+                    AND run_date = (
+                        SELECT MAX(run_date) FROM forecast_metrics WHERE product_id = $2
+                    )
+                """, new_params, product_id)
+
+                # ── Day 7: Drift detection ────────────────────────────────────────
+                # Simulate post-tuning MAPE: apply a random improvement of 5-15%.
+                # In production: re-run the model with new_params on validation data.
+                post_mape = None
+                mape_delta = None
+                if pre_mape is not None:
+                    improvement_factor = random.uniform(0.05, 0.15)
+                    post_mape = round(pre_mape * (1 - improvement_factor), 4)
+                    mape_delta = round(pre_mape - post_mape, 4)
+
+                    # Insert a new forecast_metrics row reflecting the post-tuning run
+                    today = date.today()
+                    await conn.execute("""
+                        INSERT INTO forecast_metrics
+                            (product_id, model_name, mape, run_date, hyperparameters, notes)
+                        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                        ON CONFLICT DO NOTHING
+                    """,
+                        product_id,
+                        model_name,
+                        post_mape,
+                        today,
+                        new_params,
+                        f"Post-tuning run (simulated). Pre-tuning MAPE: {pre_mape:.4f}. Delta: -{mape_delta:.4f}."
+                    )
+                    logger.info(f"Drift check: {product_id} MAPE {pre_mape:.4f} → {post_mape:.4f} (Δ {mape_delta:.4f})")
+
+                # Log the change with drift data
+                await conn.execute("""
+                    INSERT INTO hyperparameter_tuning_log
+                        (product_id, old_params, new_params, rationale, status,
+                         pre_mape, post_mape, mape_delta, simulated, evaluated_at)
+                    VALUES ($1, $2::jsonb, $3::jsonb, $4, 'approved',
+                            $5, $6, $7, TRUE, NOW())
                 """,
                     product_id,
-                    model_name,
-                    post_mape,
-                    today,
+                    old_params,
                     new_params,
-                    f"Post-tuning run (simulated). Pre-tuning MAPE: {pre_mape:.4f}. Delta: -{mape_delta:.4f}."
+                    proposed.get("rationale", "Approved via HITL dashboard"),
+                    pre_mape,
+                    post_mape,
+                    mape_delta,
                 )
-                logger.info(f"Drift check: {product_id} MAPE {pre_mape:.4f} → {post_mape:.4f} (Δ {mape_delta:.4f})")
 
-            # Log the change with drift data
-            await conn.execute("""
-                INSERT INTO hyperparameter_tuning_log
-                    (product_id, old_params, new_params, rationale, status,
-                     pre_mape, post_mape, mape_delta, simulated, evaluated_at)
-                VALUES ($1, $2::jsonb, $3::jsonb, $4, 'approved',
-                        $5, $6, $7, TRUE, NOW())
-            """,
-                product_id,
-                old_params,
-                new_params,
-                proposed.get("rationale", "Approved via HITL dashboard"),
-                pre_mape,
-                post_mape,
-                mape_delta,
-            )
-
-            improvement_str = f"MAPE {pre_mape:.1%} → {post_mape:.1%} (Δ {mape_delta:.1%})" if post_mape else "N/A"
-            return (
-                f"Hyperparameters updated for {product_id}. "
-                f"Drift check: {improvement_str}. "
-                f"Expected: {proposed.get('expected_mape_improvement', 'N/A')}."
-            )
+                improvement_str = f"MAPE {pre_mape:.1%} → {post_mape:.1%} (Δ {mape_delta:.1%})" if post_mape else "N/A"
+                return (
+                    f"Hyperparameters updated for {product_id}. "
+                    f"Drift check: {improvement_str}. "
+                    f"Expected: {proposed.get('expected_mape_improvement', 'N/A')}."
+                )
         finally:
-            await conn.close()
+            await pool.close()
     except Exception as e:
         logger.error(f"Forecast tuning execute failed: {e}", exc_info=True)
         return f"Forecast tuning execute error: {str(e)}"
