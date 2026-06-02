@@ -56,8 +56,11 @@ formatter_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
 SEMANTIC_SCHEMA = """
 Available data for supply chain analytics:
 
+PRODUCTS (products):
+  - product: product_id, product_name, category (skincare/haircare/cosmetics), price
+
 TRANSACTIONS (supply_chain_records):
-  - product: product_name, category (skincare/haircare/cosmetics)
+  - product: product_id
   - location: region (Northeast/Southeast/West/Midwest)
   - financials: revenue, shipping_costs, manufacturing_costs
   - quantities: order_quantity
@@ -65,7 +68,7 @@ TRANSACTIONS (supply_chain_records):
   - segment: customer_segment (retail/wholesale)
 
 INVENTORY (inventory):
-  - product: product_id, product_name
+  - product: product_id
   - location: location (same regions as above)
   - stock: stock_level, reorder_point, max_capacity
   - derived: status (CRITICAL when stock < reorder_point)
