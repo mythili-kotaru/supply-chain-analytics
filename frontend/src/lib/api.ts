@@ -43,6 +43,9 @@ export const api = {
   getInventoryAlerts: () =>
     apiFetch<InventoryAlert[]>("/inventory/alerts"),
 
+  getInventoryAll: () =>
+    apiFetch<InventoryAlert[]>("/inventory/all"),
+
   getForecastAlerts: () =>
     apiFetch<ForecastAlert[]>("/forecast/alerts"),
 

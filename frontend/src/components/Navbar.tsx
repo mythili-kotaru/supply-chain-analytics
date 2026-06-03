@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Activity, Bell, Settings, ChevronDown, Zap } from "lucide-react";
 import type { DashboardStats } from "@/types";
 
@@ -7,8 +9,17 @@ interface NavbarProps {
   stats: DashboardStats;
 }
 
+const NAV_ITEMS = [
+  { name: "Dashboard", href: "/" },
+  { name: "Inventory", href: "/inventory" },
+  { name: "Forecasting", href: "/forecasting" },
+  { name: "Orders", href: "/orders" },
+  { name: "Analytics", href: "/analytics" },
+];
+
 export function Navbar({ stats }: NavbarProps) {
   const allHealthy = stats.services.every((s) => s.status === "healthy");
+  const pathname = usePathname();
 
   return (
     <header className="h-14 border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm flex items-center px-6 gap-6 sticky top-0 z-50">
@@ -28,18 +39,22 @@ export function Navbar({ stats }: NavbarProps) {
 
       {/* Nav links */}
       <nav className="hidden md:flex items-center gap-1 text-sm">
-        {["Dashboard", "Inventory", "Forecasting", "Orders", "Analytics"].map((item, i) => (
-          <button
-            key={item}
-            className={`px-3 py-1.5 rounded-lg transition-colors ${
-              i === 0
-                ? "bg-slate-800 text-white font-medium"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
-            }`}
-          >
-            {item}
-          </button>
-        ))}
+        {NAV_ITEMS.map((item) => {
+          const isActive = pathname === item.href;
+          return (
+            <Link
+              key={item.name}
+              href={item.href}
+              className={`px-3 py-1.5 rounded-lg transition-colors ${
+                isActive
+                  ? "bg-slate-800 text-white font-medium"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              }`}
+            >
+              {item.name}
+            </Link>
+          );
+        })}
       </nav>
 
       {/* Spacer */}

@@ -676,6 +676,45 @@ async def get_thread_state(thread_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class AnalyticsQueryRequest(BaseModel):
+    query: str
+    role: str = "analyst"
+
+class AnalyticsQueryResponse(BaseModel):
+    sql_query: str
+    results: list[dict[str, Any]]
+    insight: str
+    result_count: int
+    error: Optional[str] = None
+
+@app.post("/analytics/query", response_model=AnalyticsQueryResponse)
+async def run_analytics_query(req: AnalyticsQueryRequest):
+    """
+    Execute a natural language to SQL query via the sql_insights pipeline.
+    """
+    from agents.sql_insights.pipeline import run_sql_insights
+    
+    try:
+        # We need a db pool to run the query because pipeline calls pool.acquire()
+        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2)
+        try:
+            result = await run_sql_insights(
+                query=req.query,
+                role=req.role,
+                pool=pool
+            )
+            return AnalyticsQueryResponse(
+                sql_query=result.get("sql_query", ""),
+                results=result.get("results", []),
+                insight=result.get("insight", ""),
+                result_count=result.get("result_count", 0),
+                error=result.get("error")
+            )
+        finally:
+            await pool.close()
+    except Exception as e:
+        logger.error(f"Analytics query failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
