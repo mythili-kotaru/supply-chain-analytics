@@ -42,20 +42,30 @@ function MapeBar({ value }: { value: number }) {
   );
 }
 
+import Link from "next/link";
+
 export function ForecastPanel({ alerts }: ForecastPanelProps) {
   const criticalCount = alerts.filter((a) => a.mape_pct > 25).length;
 
   return (
-    <div className="card h-full flex flex-col">
+    <div className="card h-full flex flex-col relative group">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-violet-400" />
           <h2 className="text-sm font-semibold text-white">Forecast Health</h2>
         </div>
-        <span className={criticalCount > 0 ? "badge-critical" : "badge-high"}>
-          {alerts.length} above threshold
-        </span>
+        <div className="flex items-center gap-3">
+          <span className={criticalCount > 0 ? "badge-critical" : "badge-high"}>
+            {alerts.length} above threshold
+          </span>
+          <Link 
+            href="/forecasting"
+            className="text-xs text-violet-400 hover:text-violet-300 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            View Models &rarr;
+          </Link>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60">
