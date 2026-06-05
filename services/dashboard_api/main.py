@@ -161,3 +161,30 @@ async def monitor_status():
             "next_run":  str(job.next_run_time),
         })
     return {"scheduler": "running" if scheduler.running else "stopped", "jobs": jobs}
+
+
+@app.post("/api/dashboard/monitor/run")
+async def trigger_monitor_run():
+    """
+    Manually triggers all background monitors immediately.
+    Useful for on-demand agent scans from the UI.
+    """
+    db = app.state.db
+    results = {}
+    try:
+        await inventory_monitor(db)
+        results["inventory_monitor"] = "ok"
+    except Exception as e:
+        results["inventory_monitor"] = f"error: {e}"
+    try:
+        await forecast_monitor(db)
+        results["forecast_monitor"] = "ok"
+    except Exception as e:
+        results["forecast_monitor"] = f"error: {e}"
+    try:
+        await anomaly_monitor(db)
+        results["anomaly_monitor"] = "ok"
+    except Exception as e:
+        results["anomaly_monitor"] = f"error: {e}"
+
+    return {"status": "triggered", "results": results}

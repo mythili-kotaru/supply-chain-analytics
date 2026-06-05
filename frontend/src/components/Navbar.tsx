@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Bell, Settings, ChevronDown, Zap } from "lucide-react";
+import { Activity, Bell, ChevronDown, Zap } from "lucide-react";
 import type { DashboardStats } from "@/types";
+import { UserProfilePanel } from "@/components/UserProfilePanel";
 
 interface NavbarProps {
   stats: DashboardStats;
@@ -20,6 +22,7 @@ const NAV_ITEMS = [
 export function Navbar({ stats }: NavbarProps) {
   const allHealthy = stats.services.every((s) => s.status === "healthy");
   const pathname = usePathname();
+  const [profileOpen, setProfileOpen] = useState(false);
 
   return (
     <header className="h-14 border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm flex items-center px-6 gap-6 sticky top-0 z-50">
@@ -83,17 +86,26 @@ export function Navbar({ stats }: NavbarProps) {
         )}
       </button>
 
-      {/* User */}
-      <button className="flex items-center gap-2 pl-3 border-l border-slate-800 hover:opacity-80 transition-opacity">
-        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center text-xs font-bold text-white">
-          U
-        </div>
-        <div className="hidden sm:block text-left">
-          <p className="text-xs font-medium text-white leading-none">User</p>
-          <p className="text-[10px] text-slate-500 leading-none mt-0.5">Analyst</p>
-        </div>
-        <ChevronDown className="w-3 h-3 text-slate-500" />
-      </button>
+      {/* User — click to open profile panel */}
+      <div className="relative">
+        <button
+          onClick={() => setProfileOpen((v) => !v)}
+          className="flex items-center gap-2 pl-3 border-l border-slate-800 hover:opacity-80 transition-opacity"
+        >
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center text-xs font-bold text-white">
+            MK
+          </div>
+          <div className="hidden sm:block text-left">
+            <p className="text-xs font-medium text-white leading-none">Mythili Kotaru</p>
+            <p className="text-[10px] text-slate-500 leading-none mt-0.5">Analyst</p>
+          </div>
+          <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${profileOpen ? "rotate-180" : ""}`} />
+        </button>
+
+        {profileOpen && (
+          <UserProfilePanel stats={stats} onClose={() => setProfileOpen(false)} />
+        )}
+      </div>
     </header>
   );
 }

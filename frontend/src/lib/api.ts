@@ -87,4 +87,7 @@ export const api = {
 
   triggerAnomalyScan: () =>
     apiFetch<{ status: string; summary: Record<string, unknown> }>("/anomaly/scan", { method: "POST" }),
+
+  triggerMonitorRun: () =>
+    apiFetch<{ status: string; results: Record<string, string> }>("/monitor/run", { method: "POST" }),
 };
