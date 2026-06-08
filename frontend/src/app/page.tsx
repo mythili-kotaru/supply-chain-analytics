@@ -9,6 +9,8 @@ import { ForecastPanel } from "@/components/ForecastPanel";
 import { DriftPanel } from "@/components/DriftPanel";
 import { AnomalyFeed } from "@/components/AnomalyFeed";
 import { useToast } from "@/components/Toast";
+import { InventoryDonutChart } from "@/components/InventoryDonutChart";
+import { CategoryCapacityBarChart } from "@/components/CategoryCapacityBarChart";
 import { api } from "@/lib/api";
 import type { Proposal, DashboardStats, InventoryAlert, ForecastAlert } from "@/types";
 import { RefreshCw, Search } from "lucide-react";
@@ -318,6 +320,18 @@ export default function DashboardPage() {
 
         {/* Drift Detection — hyperparameter tuning outcomes */}
         <DriftPanel />
+
+        {/* Analytics at a Glance — Chart.js visualisations */}
+        <div className="space-y-3">
+          <h2 className="text-base font-semibold text-white flex items-center gap-2">
+            <span className="w-1.5 h-4 rounded-full bg-gradient-to-b from-violet-500 to-fuchsia-500" />
+            Analytics at a Glance
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <InventoryDonutChart />
+            <CategoryCapacityBarChart />
+          </div>
+        </div>
 
       </main>
     </div>

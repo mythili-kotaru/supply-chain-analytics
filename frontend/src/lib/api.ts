@@ -90,4 +90,12 @@ export const api = {
 
   triggerMonitorRun: () =>
     apiFetch<{ status: string; results: Record<string, string> }>("/monitor/run", { method: "POST" }),
+
+  // ── Charts ──────────────────────────────────────────────────────────────────
+
+  getInventoryHealthChart: () =>
+    apiFetch<Record<string, number>>("/charts/inventory-health"),
+
+  getInventoryByCategoryChart: () =>
+    apiFetch<{ category: string; avg_capacity_pct: number; sku_count: number; at_risk: number }[]>("/charts/inventory-by-category"),
 };

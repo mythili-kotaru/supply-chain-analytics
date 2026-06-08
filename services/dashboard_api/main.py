@@ -33,7 +33,7 @@ from monitor import (
     FORECAST_CHECK_INTERVAL,
     ANOMALY_CHECK_INTERVAL,
 )
-from routers import inventory, forecast, proposals, stats, anomaly, analytics
+from routers import inventory, forecast, proposals, stats, anomaly, analytics, charts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -139,6 +139,7 @@ app.include_router(proposals.router, prefix=PREFIX, tags=["proposals"])
 app.include_router(stats.router,     prefix=PREFIX, tags=["stats"])
 app.include_router(anomaly.router,   prefix=PREFIX, tags=["anomaly"])
 app.include_router(analytics.router, prefix=PREFIX + "/analytics", tags=["analytics"])
+app.include_router(charts.router,    prefix=PREFIX, tags=["charts"])
 
 
 @app.get("/health")

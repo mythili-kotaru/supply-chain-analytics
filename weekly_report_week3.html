@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weekly Report – Week 3</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      color: #222;
+      max-width: 680px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+
+    h1 {
+      text-align: center;
+      color: #2563eb;
+      font-size: 22px;
+      margin-bottom: 24px;
+    }
+
+    h2 {
+      color: #2563eb;
+      font-size: 14px;
+      margin: 24px 0 6px;
+      border-bottom: none;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+
+    /* Employee details table */
+    .details-table td {
+      border: 1px solid #ccc;
+      padding: 6px 10px;
+    }
+    .details-table td:first-child {
+      font-weight: bold;
+      width: 140px;
+      background: #f9f9f9;
+    }
+
+    /* Tasks list */
+    .tasks-table td {
+      border: 1px solid #ccc;
+      padding: 7px 10px;
+      vertical-align: top;
+    }
+    .tasks-table td.bullet {
+      width: 14px;
+      text-align: center;
+      color: #555;
+    }
+
+    /* DSA table */
+    .dsa-table th {
+      background: #2563eb;
+      color: #fff;
+      padding: 7px 10px;
+      text-align: left;
+      font-weight: normal;
+    }
+    .dsa-table td {
+      border: 1px solid #ccc;
+      padding: 6px 10px;
+    }
+    .dsa-table tr:nth-child(even) td {
+      background: #f5f8ff;
+    }
+
+    .dsa-subtitle {
+      font-style: italic;
+      color: #444;
+      margin: 0 0 8px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Weekly Report</h1>
+
+  <!-- Employee Details -->
+  <h2>Employee Details</h2>
+  <table class="details-table">
+    <tr><td>Employee Name</td><td>Mythili Kotaru</td></tr>
+    <tr><td>Email</td><td>mythili@hashclicksolutions.com</td></tr>
+    <tr><td>Week</td><td>Week 3</td></tr>
+    <tr><td>Submission Date</td><td>June 5, 2026</td></tr>
+  </table>
+
+  <!-- Tasks Completed -->
+  <h2>Tasks Completed</h2>
+  <table class="tasks-table">
+    <tr>
+      <td class="bullet">•</td>
+      <td>Built the <strong>Analytics Module</strong> — a natural language to SQL interface powered by the LangGraph agent. Users can type plain-English queries like "What is the revenue for skincare in the Northeast?" and receive a live-executed insight and data table backed by Postgres. Wired the dashboard API as a secure proxy to the internal langgraph_agent service to avoid duplicating LangChain dependencies.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Built the <strong>Inventory Module</strong> — a full-page global inventory ledger showing all products across all distribution centers with live capacity progress bars. Added search-by-product-name, and dropdown filters for Category, Region, and Status (CRITICAL / LOW / OK). Extended the backend with a new <code>GET /inventory/all</code> endpoint computing live status and capacity percentages from Postgres.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Built the <strong>Forecasting Module</strong> — a dedicated page for monitoring AI predictive model accuracy. The top section shows a card-based grid of all models where MAPE has breached the 15% threshold. The bottom section is the AI Hyperparameter Tuning Log showing every auto-tuning round the agent proposed, including the plain-English rationale and the resulting MAPE improvement delta post-evaluation. Added a "View Models" shortcut link to the existing dashboard ForecastPanel.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Built the <strong>Orders Module</strong> — a historical ledger of all approved AI actions currently in transit. Contains two tables: a Purchase Orders grid (for replenishment proposals) listing PO number, supplier, quantity, and expected delivery; and an Inter-Warehouse Transfers grid (for allocation proposals) mapping from-location to to-location with the AI's per-transfer rationale. Live metric cards show total in-transit value and units transferring.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Built the <strong>User Profile &amp; Settings Panel</strong> — converted the static user avatar in the Navbar into an interactive dropdown. The panel shows the user's name and role, live pending-approval and critical-alert counters, a "Trigger Monitor Scan" button that fires all three background agents (inventory, forecast, anomaly) on demand with a real-time result message, and a per-service system health status. Added a new <code>POST /api/dashboard/monitor/run</code> backend endpoint to support the on-demand scan feature. Panel closes cleanly on outside click.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Completed the <strong>Navbar routing</strong> — converted all static navigation buttons to Next.js <code>&lt;Link&gt;</code> components with active-state highlighting using <code>usePathname</code>, so every module tab (Dashboard, Inventory, Forecasting, Orders, Analytics) is now fully navigable without page reload.</td>
+    </tr>
+  </table>
+
+  <!-- DSA Practice -->
+  <h2>DSA Practice , Problems Solved</h2>
+  <p class="dsa-subtitle">Week 3 Objectives:</p>
+  <table class="dsa-table">
+    <thead>
+      <tr>
+        <th>Problem</th>
+        <th>Category</th>
+        <th>Technique Used</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td></tr>
+    </tbody>
+  </table>
+
+  <!-- Skills Learned -->
+  <h2>Skills Learned</h2>
+  <table class="tasks-table">
+    <tr>
+      <td class="bullet">•</td>
+      <td>Building modular full-stack features end-to-end — designing backend API routes, Next.js proxy layers, TypeScript types, and React UI components together as a cohesive unit rather than in isolation.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Microservice proxy patterns — routing requests from a lightweight FastAPI service (dashboard_api) to a heavier AI-enabled service (langgraph_agent) over the internal Docker network to keep dependency boundaries clean.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Natural language to SQL pipelines — understanding how LangGraph agent nodes convert user intent into structured Postgres queries, and how to surface those results clearly in a UI data table.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>On-demand background job triggering — exposing a REST endpoint to fire APScheduler-backed background monitors manually from the UI, and using <code>app.state</code> to access the shared database pool from ad-hoc endpoints.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Interactive dropdown component patterns in React — implementing click-outside-to-close behavior with <code>useRef</code> + <code>useEffect</code>, and toggling open/close state cleanly with a chevron rotation indicator.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Live-derived database metrics — computing status labels (CRITICAL / LOW / OK) and capacity percentages at query time using Postgres <code>CASE</code> expressions and arithmetic, rather than storing stale pre-computed values.</td>
+    </tr>
+  </table>
+
+  <!-- Challenges -->
+  <h2>Challenges</h2>
+  <table class="tasks-table">
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Missing langchain_openai dependency:</strong> The dashboard_api container crashed on startup after importing the sql_insights pipeline because langchain_openai was not installed in that service's environment, requiring a proxy architecture redesign.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>asyncpg Pool vs Connection mismatch:</strong> The sql_insights pipeline calls <code>pool.acquire()</code> internally, so passing a bare <code>asyncpg.connect()</code> connection caused a runtime AttributeError that only appeared after the LLM had already generated a query.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Missing Depends import in main.py:</strong> Adding the monitor/run endpoint with <code>Depends(get_db)</code> caused a NameError on startup because <code>Depends</code> was never imported into main.py — the existing endpoints used a different injection pattern via a shared state object.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>SQL schema drift:</strong> The SEMANTIC_SCHEMA prompt used by the NL2SQL agent referenced columns (e.g. <code>product_name</code> on supply_chain_records) that no longer existed after the schema was normalized with a separate products table, causing generated queries to fail silently.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Next.js API route gaps:</strong> Several new backend endpoints (e.g. <code>/inventory/all</code>, <code>/monitor/run</code>) required corresponding Next.js proxy route files to be created manually — missing routes caused silent 404s that were not obvious from the frontend error messages.</td>
+    </tr>
+  </table>
+
+  <!-- Solutions -->
+  <h2>Solutions</h2>
+  <table class="tasks-table">
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Proxy architecture:</strong> Instead of installing langchain in dashboard_api, refactored analytics.py to use httpx to proxy requests to the internal langgraph_agent service, which already had all LangChain dependencies installed — keeping services decoupled and images lean.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>asyncpg.create_pool() for single requests:</strong> Replaced the bare <code>asyncpg.connect()</code> call with <code>asyncpg.create_pool(min_size=1, max_size=2)</code> inside the langgraph_agent endpoint handler and closed the pool in a <code>finally</code> block, satisfying the pipeline's <code>pool.acquire()</code> contract without modifying the pipeline code.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>app.state.db pattern:</strong> Instead of adding the missing <code>Depends</code> import and wiring up a dependency injector just for one endpoint, accessed the database pool directly from <code>app.state.db</code> which is set during lifespan startup — a simpler and consistent approach used by other internal endpoints.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Schema prompt update:</strong> Added a PRODUCTS table entry to the SEMANTIC_SCHEMA with join relationship definitions, and added a RULES section instructing the LLM to always join via product_id and include product_name in SELECT statements, fixing the column-not-found errors.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Systematic Next.js route creation:</strong> Established a pattern of always creating the <code>app/api/dashboard/[route]/route.ts</code> proxy file alongside each new backend endpoint, ensuring the full request chain (browser → Next.js → FastAPI → Postgres) is complete before testing.</td>
+    </tr>
+  </table>
+
+</body>
+</html>
