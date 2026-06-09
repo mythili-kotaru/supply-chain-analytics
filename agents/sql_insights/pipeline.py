@@ -30,10 +30,117 @@ import json
 import asyncio
 import asyncpg
 import logging
+import base64
+import wren
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────
+# WREN ENGINE MANIFEST
+#
+# Real Modeling Definition Language (MDL) represented as a JSON manifest.
+# Base64-encoded to initialize the offline WrenEngine.
+# ─────────────────────────────────────────────
+WREN_MANIFEST_DICT = {
+  "catalog": "wren",
+  "schema": "public",
+  "models": [
+    {
+      "name": "products",
+      "tableReference": {
+        "schema": "public",
+        "table": "products"
+      },
+      "columns": [
+        { "name": "product_id", "type": "varchar" },
+        { "name": "product_name", "type": "varchar" },
+        { "name": "category", "type": "varchar" },
+        { "name": "price", "type": "double" }
+      ],
+      "primaryKey": "product_id"
+    },
+    {
+      "name": "supply_chain_records",
+      "tableReference": {
+        "schema": "public",
+        "table": "supply_chain_records"
+      },
+      "columns": [
+        { "name": "record_id", "type": "integer" },
+        { "name": "product_id", "type": "varchar" },
+        { "name": "supplier_id", "type": "varchar" },
+        { "name": "order_quantity", "type": "integer" },
+        { "name": "order_date", "type": "date" },
+        { "name": "ship_date", "type": "date" },
+        { "name": "delivery_date", "type": "date" },
+        { "name": "shipping_costs", "type": "double" },
+        { "name": "manufacturing_costs", "type": "double" },
+        { "name": "revenue", "type": "double" },
+        { "name": "region", "type": "varchar" },
+        { "name": "customer_segment", "type": "varchar" }
+      ],
+      "primaryKey": "record_id"
+    },
+    {
+      "name": "inventory",
+      "tableReference": {
+        "schema": "public",
+        "table": "inventory"
+      },
+      "columns": [
+        { "name": "id", "type": "integer" },
+        { "name": "product_id", "type": "varchar" },
+        { "name": "location", "type": "varchar" },
+        { "name": "stock_level", "type": "integer" },
+        { "name": "reorder_point", "type": "integer" },
+        { "name": "max_capacity", "type": "integer" }
+      ],
+      "primaryKey": "id"
+    },
+    {
+      "name": "forecast_metrics",
+      "tableReference": {
+        "schema": "public",
+        "table": "forecast_metrics"
+      },
+      "columns": [
+        { "name": "id", "type": "integer" },
+        { "name": "product_id", "type": "varchar" },
+        { "name": "run_date", "type": "date" },
+        { "name": "model_name", "type": "varchar" },
+        { "name": "mape", "type": "double" },
+        { "name": "mae", "type": "double" },
+        { "name": "notes", "type": "varchar" }
+      ],
+      "primaryKey": "id"
+    }
+  ],
+  "relationships": [
+    {
+      "name": "records_to_products",
+      "models": ["supply_chain_records", "products"],
+      "joinType": "many_to_one",
+      "condition": "supply_chain_records.product_id = products.product_id"
+    },
+    {
+      "name": "inventory_to_products",
+      "models": ["inventory", "products"],
+      "joinType": "many_to_one",
+      "condition": "inventory.product_id = products.product_id"
+    },
+    {
+      "name": "forecast_to_products",
+      "models": ["forecast_metrics", "products"],
+      "joinType": "many_to_one",
+      "condition": "forecast_metrics.product_id = products.product_id"
+    }
+  ]
+}
+
+WREN_MANIFEST_B64 = base64.b64encode(json.dumps(WREN_MANIFEST_DICT).encode('utf-8')).decode('utf-8')
+
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scai:scai_password@localhost:5432/supply_chain")
 
@@ -159,7 +266,23 @@ Intent details: {json.dumps(parsed_intent)}"""),
     if sql_query.startswith("```"):
         sql_query = sql_query.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
-    logger.info(f"Generated SQL: {sql_query[:200]}...")
+    logger.info(f"Generated Semantic SQL: {sql_query[:200]}...")
+
+    # ─────────────────────────────────────────────
+    # WREN ENGINE COMPILATION
+    # Compile the semantic SQL query using Wren Engine.
+    # ─────────────────────────────────────────────
+    try:
+        engine = wren.WrenEngine(
+            manifest_str=WREN_MANIFEST_B64,
+            data_source="postgres",
+            connection_info={}
+        )
+        compiled_query = engine.dry_plan(sql_query)
+        logger.info(f"Wren Engine successfully compiled SQL query.")
+        sql_query = compiled_query
+    except Exception as e:
+        logger.warning(f"Wren Engine compilation failed: {e}. Falling back to raw semantic query.")
 
     # ─────────────────────────────────────────────
     # EXECUTE THE SQL

@@ -162,6 +162,7 @@ services:
   # shares the same graph code without duplication.
   # ─────────────────────────────────────────────
   langgraph_agent:
+    platform: linux/amd64
     build:
       context: ./services/langgraph_agent
       dockerfile: Dockerfile
