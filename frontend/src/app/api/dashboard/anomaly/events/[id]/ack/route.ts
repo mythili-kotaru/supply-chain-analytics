@@ -1,16 +1,13 @@
-import { NextResponse } from "next/server";
-
-const DASHBOARD_API_URL =
-  process.env.DASHBOARD_API_URL || "http://localhost:8003";
+import { NextRequest } from "next/server";
+import { forwardRequest } from "@/lib/proxy";
 
 export async function POST(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const res = await fetch(
-    `${DASHBOARD_API_URL}/api/dashboard/anomaly/events/${params.id}/ack`,
-    { method: "POST", cache: "no-store" }
+  return forwardRequest(
+    req,
+    `/api/dashboard/anomaly/events/${params.id}/ack`,
+    { method: "POST" }
   );
-  const data = await res.json();
-  return NextResponse.json(data);
 }

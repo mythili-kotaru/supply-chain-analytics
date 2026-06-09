@@ -11,7 +11,7 @@ These endpoints expose the results to the dashboard and allow manual triggers.
 import os
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 import asyncpg
 from database import get_db
 
@@ -112,11 +112,17 @@ async def get_anomaly_stats(db: asyncpg.Pool = Depends(get_db)):
 
 
 @router.post("/anomaly/events/{event_id}/ack")
-async def acknowledge_anomaly(event_id: int, db: asyncpg.Pool = Depends(get_db)):
+async def acknowledge_anomaly(
+    event_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    x_role: str = Header("analyst"),
+):
     """
     Mark an anomaly as acknowledged (dismissed by ops manager).
     Acknowledged anomalies still appear in the feed but are visually de-emphasised.
     """
+    if x_role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can acknowledge anomalies.")
     result = await db.execute("""
         UPDATE anomaly_events
         SET acknowledged = TRUE, acknowledged_at = NOW()
@@ -130,11 +136,13 @@ async def acknowledge_anomaly(event_id: int, db: asyncpg.Pool = Depends(get_db))
 
 
 @router.post("/anomaly/scan")
-async def trigger_scan():
+async def trigger_scan(x_role: str = Header("analyst")):
     """
     Manually trigger an anomaly scan — useful for testing without waiting for the scheduler.
     Runs synchronously (in the background via asyncio) and returns a summary.
     """
+    if x_role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can trigger manual scans.")
     import sys, pathlib
     # Ensure agents/ is importable
     _here = pathlib.Path(__file__).resolve()

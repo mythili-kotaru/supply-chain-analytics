@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Activity, Bell, ChevronDown, Zap } from "lucide-react";
@@ -97,13 +97,18 @@ export function Navbar({ stats }: NavbarProps) {
           </div>
           <div className="hidden sm:block text-left">
             <p className="text-xs font-medium text-white leading-none">Mythili Kotaru</p>
-            <p className="text-[10px] text-slate-500 leading-none mt-0.5">Analyst</p>
+            <p className="text-[10px] text-slate-500 leading-none mt-0.5 capitalize">{role}</p>
           </div>
           <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${profileOpen ? "rotate-180" : ""}`} />
         </button>
 
         {profileOpen && (
-          <UserProfilePanel stats={stats} onClose={() => setProfileOpen(false)} />
+          <UserProfilePanel 
+            stats={stats} 
+            role={role}
+            setRole={setRole}
+            onClose={() => setProfileOpen(false)} 
+          />
         )}
       </div>
     </header>

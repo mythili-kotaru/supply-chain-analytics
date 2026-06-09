@@ -444,10 +444,15 @@ async def hitl_node(state: SupplyChainState) -> dict:
     Day 6 addition: after approval, call the appropriate execute function
     to actually write changes to the database.
     """
-    # If already approved (graph is resuming after interrupt), execute the action
+    # ── Fallback for re-running node from beginning (if human_approved is already set)
     if state.get("human_approved") is not None:
+        user_role = state.get("user_role", "analyst")
         if state["human_approved"]:
-            # ── Day 6: Execute DB writes ──────────────────────────────────────
+            if user_role != "admin":
+                return {
+                    "next_action": "done",
+                    "messages": [AIMessage(content="Permission denied: Only administrator role can execute changes.")]
+                }
             execution_messages = []
 
             alloc_task_id = state.get("allocation_task_id")
@@ -491,12 +496,52 @@ async def hitl_node(state: SupplyChainState) -> dict:
 
     approved = human_response.get("approved", False)
     feedback = human_response.get("feedback", "")
+    user_role = human_response.get("user_role", state.get("user_role", "analyst"))
 
-    return {
-        "human_approved": approved,
-        "human_feedback": feedback,
-        "next_action": "done"
-    }
+    if approved:
+        # Enforce role verification on immediate execution path
+        if user_role != "admin":
+            return {
+                "human_approved": False,
+                "human_feedback": "Permission denied: Only administrator role can execute changes.",
+                "user_role": user_role,
+                "next_action": "done",
+                "messages": [AIMessage(content="Permission denied: Only administrator role can execute changes.")]
+            }
+
+        execution_messages = []
+        alloc_task_id = state.get("allocation_task_id")
+        replen_task_id = state.get("replenishment_task_id")
+        intent = state.get("parsed_intent", {}).get("query_type", "")
+
+        if alloc_task_id or state.get("allocation_result"):
+            msg = await _execute_allocation(alloc_task_id, state.get("allocation_result"))
+            execution_messages.append(f"Allocation: {msg}")
+
+        if replen_task_id or state.get("replenishment_result"):
+            msg = await _execute_replenishment(replen_task_id, state.get("replenishment_result"))
+            execution_messages.append(f"Replenishment: {msg}")
+
+        if intent == "forecast_tuning" or state.get("proposed_tuning"):
+            msg = await _execute_forecast_tuning(state)
+            execution_messages.append(f"Forecast tuning: {msg}")
+
+        summary = " | ".join(execution_messages) if execution_messages else "Action approved and executed."
+        return {
+            "human_approved": approved,
+            "human_feedback": feedback,
+            "user_role": user_role,
+            "next_action": "done",
+            "messages": [AIMessage(content=summary)]
+        }
+    else:
+        return {
+            "human_approved": approved,
+            "human_feedback": feedback,
+            "user_role": user_role,
+            "next_action": "done",
+            "messages": [AIMessage(content=f"Action rejected. Reason: {feedback or 'No reason given'}.")]
+        }
 
 
 # ─────────────────────────────────────────────

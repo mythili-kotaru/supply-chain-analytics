@@ -23,10 +23,21 @@ import type {
 // In Next.js, /api/... routes are always relative to the current origin
 const BASE = "/api/dashboard";
 
+const getRole = () => {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("scai_user_role") || "analyst";
+  }
+  return "analyst";
+};
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers);
+  headers.set("Content-Type", "application/json");
+  headers.set("x-role", getRole());
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
 
   if (!res.ok) {

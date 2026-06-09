@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timezone, timedelta
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import create_pool
@@ -165,11 +165,13 @@ async def monitor_status():
 
 
 @app.post("/api/dashboard/monitor/run")
-async def trigger_monitor_run():
+async def trigger_monitor_run(x_role: str = Header("analyst")):
     """
     Manually triggers all background monitors immediately.
     Useful for on-demand agent scans from the UI.
     """
+    if x_role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can trigger manual monitor runs.")
     db = app.state.db
     results = {}
     try:

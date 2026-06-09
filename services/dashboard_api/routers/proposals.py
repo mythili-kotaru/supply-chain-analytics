@@ -21,7 +21,7 @@ import os
 import logging
 import re
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 import asyncpg
 import httpx
 
@@ -107,6 +107,7 @@ async def _resume_langgraph(
     thread_id: str,
     approved: bool,
     feedback: str = "",
+    user_role: str = "admin",
 ) -> dict:
     """
     Call POST /resume on the LangGraph agent service.
@@ -128,7 +129,7 @@ async def _resume_langgraph(
         "thread_id": thread_id,
         "approved": approved,
         "feedback": feedback,
-        "user_role": "admin",
+        "user_role": user_role,
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(f"{LANGGRAPH_AGENT_URL}/resume", json=payload)
@@ -141,6 +142,7 @@ async def _update_proposal_status(
     proposal_id: str,
     new_status: str,
     feedback: str = "",
+    user_role: str = "analyst",
 ) -> dict:
     """
     Day 4: Resume the LangGraph graph (if thread_id exists), then update DB.
@@ -182,6 +184,7 @@ async def _update_proposal_status(
                 thread_id=thread_id,
                 approved=approved,
                 feedback=feedback,
+                user_role=user_role,
             )
             logger.info(
                 f"Graph completed for proposal {proposal_id}: "
@@ -254,6 +257,7 @@ async def get_proposals(
 async def approve_proposal(
     proposal_id: str,
     db: asyncpg.Pool = Depends(get_db),
+    x_role: str = Header("analyst"),
 ):
     """
     Approve a pending proposal.
@@ -265,9 +269,11 @@ async def approve_proposal(
 
     If no thread_id (agent service was down), falls back to DB-only update.
     """
+    if x_role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can approve proposals.")
     if not _UUID_RE.match(proposal_id):
         raise HTTPException(status_code=400, detail="Invalid proposal ID format (expected UUID)")
-    result = await _update_proposal_status(db, proposal_id, "approved")
+    result = await _update_proposal_status(db, proposal_id, "approved", user_role=x_role)
 
     if result["via_langgraph"]:
         message = (
@@ -289,15 +295,18 @@ async def approve_proposal(
 async def reject_proposal(
     proposal_id: str,
     db: asyncpg.Pool = Depends(get_db),
+    x_role: str = Header("analyst"),
 ):
     """
     Reject a pending proposal.
     Resumes the paused LangGraph graph with approved=False, which records
     the rejection in the graph state and terminates cleanly.
     """
+    if x_role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can reject proposals.")
     if not _UUID_RE.match(proposal_id):
         raise HTTPException(status_code=400, detail="Invalid proposal ID format (expected UUID)")
-    result = await _update_proposal_status(db, proposal_id, "rejected", feedback="Rejected by ops manager")
+    result = await _update_proposal_status(db, proposal_id, "rejected", feedback="Rejected by ops manager", user_role=x_role)
 
     if result["via_langgraph"]:
         message = f"Proposal rejected. LangGraph graph terminated cleanly."

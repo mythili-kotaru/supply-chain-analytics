@@ -17,6 +17,8 @@ import {
 
 interface UserProfilePanelProps {
   stats: DashboardStats;
+  role: "analyst" | "admin";
+  setRole: (role: "analyst" | "admin") => void;
   onClose: () => void;
 }
 
@@ -28,10 +30,19 @@ function ServiceStatusDot({ status }: { status: string }) {
   return <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
 }
 
-export function UserProfilePanel({ stats, onClose }: UserProfilePanelProps) {
+export function UserProfilePanel({ stats, role, setRole, onClose }: UserProfilePanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
+
+  const handleRoleChange = (newRole: "analyst" | "admin") => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("scai_user_role", newRole);
+      setRole(newRole);
+      onClose();
+      window.location.reload();
+    }
+  };
 
   // Close on outside click
   useEffect(() => {
@@ -75,9 +86,42 @@ export function UserProfilePanel({ stats, onClose }: UserProfilePanelProps) {
             <p className="text-sm font-semibold text-white leading-none">
               Mythili Kotaru
             </p>
-            <span className="mt-1 inline-block text-[10px] font-semibold bg-violet-500/20 text-violet-300 border border-violet-500/30 px-2 py-0.5 rounded-full">
-              Supply Chain Analyst
+            <span className={`mt-1.5 inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+              role === "admin"
+                ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
+                : "bg-blue-500/20 text-blue-300 border-blue-500/30"
+            }`}>
+              {role === "admin" ? "Ops Administrator" : "Supply Chain Analyst"}
             </span>
+          </div>
+        </div>
+
+        {/* Active Role Selector */}
+        <div className="mt-4 space-y-1.5">
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+            Select Active Role
+          </p>
+          <div className="grid grid-cols-2 gap-1 p-0.5 bg-slate-950/60 rounded-xl border border-slate-800/80">
+            <button
+              onClick={() => handleRoleChange("analyst")}
+              className={`text-[10px] py-1 rounded-lg font-medium transition-all ${
+                role === "analyst"
+                  ? "bg-slate-800 text-white font-semibold shadow"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              Analyst
+            </button>
+            <button
+              onClick={() => handleRoleChange("admin")}
+              className={`text-[10px] py-1 rounded-lg font-medium transition-all ${
+                role === "admin"
+                  ? "bg-gradient-to-br from-violet-500 to-purple-600 text-white font-semibold shadow-lg shadow-violet-900/20"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              Admin
+            </button>
           </div>
         </div>
 

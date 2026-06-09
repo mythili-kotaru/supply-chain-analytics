@@ -509,6 +509,7 @@ async def run_resume(req: ResumeRequest) -> ResumeResponse:
     resume_payload = {
         "approved": req.approved,
         "feedback": req.feedback,
+        "user_role": req.user_role,
     }
 
     async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
@@ -634,8 +635,10 @@ async def resume_graph(req: ResumeRequest):
     """
     logger.info(
         f"Resume: proposal={req.proposal_id} thread={req.thread_id} "
-        f"approved={req.approved}"
+        f"approved={req.approved} role={req.user_role}"
     )
+    if req.user_role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can resume graphs.")
     try:
         response = await run_resume(req)
         logger.info(
