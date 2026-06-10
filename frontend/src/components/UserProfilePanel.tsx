@@ -44,6 +44,15 @@ export function UserProfilePanel({ stats, role, setRole, onClose }: UserProfileP
     }
   };
 
+  const handleSignOut = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("scai_access_token");
+      localStorage.removeItem("scai_user_role");
+      localStorage.removeItem("scai_user_name");
+      window.location.reload();
+    }
+  };
+
   // Close on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -205,7 +214,10 @@ export function UserProfilePanel({ stats, role, setRole, onClose }: UserProfileP
 
       {/* Sign Out */}
       <div className="px-3 py-2">
-        <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+        >
           <LogOut className="w-4 h-4" />
           Sign Out
         </button>

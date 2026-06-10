@@ -1,11 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { forwardRequest } from "@/lib/proxy";
 
-const DASHBOARD_API = process.env.DASHBOARD_API_URL ?? "http://localhost:8003";
-
-export async function GET() {
-  const res = await fetch(`${DASHBOARD_API}/api/dashboard/stats`, {
-    next: { revalidate: 0 },
-  });
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+export async function GET(req: NextRequest) {
+  return forwardRequest(req, "/api/dashboard/stats");
 }

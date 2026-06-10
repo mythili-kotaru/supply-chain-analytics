@@ -8,8 +8,16 @@ export async function forwardRequest(
   options?: RequestInit
 ) {
   const role = request.headers.get("x-role") || "analyst";
+  const auth = request.headers.get("authorization");
+  const contentType = request.headers.get("content-type");
   const headers = new Headers(options?.headers);
   headers.set("x-role", role);
+  if (auth) {
+    headers.set("authorization", auth);
+  }
+  if (contentType) {
+    headers.set("content-type", contentType);
+  }
 
   try {
     const res = await fetch(`${DASHBOARD_API}${path}`, {

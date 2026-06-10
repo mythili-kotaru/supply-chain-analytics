@@ -30,10 +30,22 @@ const getRole = () => {
   return "analyst";
 };
 
+const getToken = () => {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("scai_access_token") || "";
+  }
+  return "";
+};
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   headers.set("Content-Type", "application/json");
   headers.set("x-role", getRole());
+
+  const token = getToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
 
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -51,6 +63,12 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 // ── Read endpoints ────────────────────────────────────────────────────────────
 
 export const api = {
+  login: (username: string, password: string) =>
+    apiFetch<{ access_token: string; token_type: string; username: string; role: string; full_name: string }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password })
+    }),
+
   getInventoryAlerts: () =>
     apiFetch<InventoryAlert[]>("/inventory/alerts"),
 

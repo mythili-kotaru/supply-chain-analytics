@@ -13,7 +13,8 @@ import { InventoryDonutChart } from "@/components/InventoryDonutChart";
 import { CategoryCapacityBarChart } from "@/components/CategoryCapacityBarChart";
 import { api } from "@/lib/api";
 import type { Proposal, DashboardStats, InventoryAlert, ForecastAlert } from "@/types";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search, Loader2 } from "lucide-react";
+import { LoginPanel } from "@/components/LoginPanel";
 
 // ─────────────────────────────────────────────
 // Day 2: All mock data replaced with real API calls.
@@ -44,6 +45,9 @@ const EMPTY_STATS: DashboardStats = {
 };
 
 export default function DashboardPage() {
+  const [token, setToken] = useState<string | null>(null);
+  const [loadingToken, setLoadingToken] = useState(true);
+
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [inventoryAlerts, setInventoryAlerts] = useState<InventoryAlert[]>([]);
   const [forecastAlerts, setForecastAlerts] = useState<ForecastAlert[]>([]);
@@ -57,6 +61,15 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   const { addToast } = useToast();
+
+  // Load token on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const storedToken = localStorage.getItem("scai_access_token");
+      setToken(storedToken);
+    }
+    setLoadingToken(false);
+  }, []);
 
   // ── Load all dashboard data in parallel ──────────────────────────────────
   const loadData = useCallback(async () => {
@@ -85,14 +98,19 @@ export default function DashboardPage() {
 
   // Initial load
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (token) {
+      loadData();
+    }
+  }, [loadData, token]);
 
   // Auto-refresh every 30s — Day 3 replaces this with SSE push
   useEffect(() => {
+    if (!token) return;
     const interval = setInterval(loadData, 30_000);
     return () => clearInterval(interval);
-  }, [loadData]);
+  }, [loadData, token]);
+
+
 
   // ── Approve handler ───────────────────────────────────────────────────────
   // Day 4: No longer does an optimistic update — the ProposalCard manages
@@ -162,6 +180,18 @@ export default function DashboardPage() {
       return matchesFilter && matchesSearch;
     });
   }, [proposals, activeFilter, searchQuery]);
+
+  if (loadingToken) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!token) {
+    return <LoginPanel onLoginSuccess={(t) => setToken(t)} />;
+  }
 
   const pendingCount = proposals.filter((p) => p.status === "pending").length;
 

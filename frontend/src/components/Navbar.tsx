@@ -23,6 +23,24 @@ export function Navbar({ stats }: NavbarProps) {
   const allHealthy = stats.services.every((s) => s.status === "healthy");
   const pathname = usePathname();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [role, setRole] = useState<"analyst" | "admin">("analyst");
+  const [userName, setUserName] = useState<string>("Mythili Kotaru");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const storedRole = localStorage.getItem("scai_user_role") as "analyst" | "admin";
+      if (storedRole) setRole(storedRole);
+      const storedName = localStorage.getItem("scai_user_name");
+      if (storedName) setUserName(storedName);
+    }
+  }, []);
+
+  const initials = userName
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .substring(0, 2)
+    .toUpperCase();
 
   return (
     <header className="h-14 border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm flex items-center px-6 gap-6 sticky top-0 z-50">
@@ -93,10 +111,10 @@ export function Navbar({ stats }: NavbarProps) {
           className="flex items-center gap-2 pl-3 border-l border-slate-800 hover:opacity-80 transition-opacity"
         >
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center text-xs font-bold text-white">
-            MK
+            {initials}
           </div>
           <div className="hidden sm:block text-left">
-            <p className="text-xs font-medium text-white leading-none">Mythili Kotaru</p>
+            <p className="text-xs font-medium text-white leading-none">{userName}</p>
             <p className="text-[10px] text-slate-500 leading-none mt-0.5 capitalize">{role}</p>
           </div>
           <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${profileOpen ? "rotate-180" : ""}`} />

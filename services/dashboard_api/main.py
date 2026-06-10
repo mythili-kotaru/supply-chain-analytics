@@ -20,8 +20,9 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timezone, timedelta
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from auth import get_current_user, get_current_role
 
 from database import create_pool
 from monitor import (
@@ -33,7 +34,7 @@ from monitor import (
     FORECAST_CHECK_INTERVAL,
     ANOMALY_CHECK_INTERVAL,
 )
-from routers import inventory, forecast, proposals, stats, anomaly, analytics, charts
+from routers import inventory, forecast, proposals, stats, anomaly, analytics, charts, auth
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +48,34 @@ async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────
     app.state.db = await create_pool()
     logger.info("✓ Database pool created")
+
+    # Create users table and seed default credentials
+    async with app.state.db.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(20) NOT NULL DEFAULT 'analyst',
+                full_name VARCHAR(100) NOT NULL
+            );
+        """)
+        
+        count = await conn.fetchval("SELECT COUNT(*) FROM users")
+        if count == 0:
+            from auth import hash_password
+            analyst_hash = hash_password("mythili123")
+            await conn.execute("""
+                INSERT INTO users (username, password_hash, role, full_name)
+                VALUES ('mythili', $1, 'analyst', 'Mythili Kotaru')
+            """, analyst_hash)
+            
+            admin_hash = hash_password("admin123")
+            await conn.execute("""
+                INSERT INTO users (username, password_hash, role, full_name)
+                VALUES ('admin', $1, 'admin', 'Ops Administrator')
+            """, admin_hash)
+            logger.info("✓ Seeded default analyst & admin credentials in users table")
 
     # ── APScheduler setup ─────────────────────────────────────
     # BackgroundScheduler runs jobs in a thread pool alongside FastAPI.
@@ -133,13 +162,14 @@ async def add_process_time_header(request: Request, call_next):
 
 # Register routers
 PREFIX = "/api/dashboard"
-app.include_router(inventory.router, prefix=PREFIX, tags=["inventory"])
-app.include_router(forecast.router,  prefix=PREFIX, tags=["forecast"])
-app.include_router(proposals.router, prefix=PREFIX, tags=["proposals"])
-app.include_router(stats.router,     prefix=PREFIX, tags=["stats"])
-app.include_router(anomaly.router,   prefix=PREFIX, tags=["anomaly"])
-app.include_router(analytics.router, prefix=PREFIX + "/analytics", tags=["analytics"])
-app.include_router(charts.router,    prefix=PREFIX, tags=["charts"])
+app.include_router(auth.router,      prefix=PREFIX, tags=["auth"])
+app.include_router(inventory.router, prefix=PREFIX, tags=["inventory"], dependencies=[Depends(get_current_user)])
+app.include_router(forecast.router,  prefix=PREFIX, tags=["forecast"], dependencies=[Depends(get_current_user)])
+app.include_router(proposals.router, prefix=PREFIX, tags=["proposals"], dependencies=[Depends(get_current_user)])
+app.include_router(stats.router,     prefix=PREFIX, tags=["stats"], dependencies=[Depends(get_current_user)])
+app.include_router(anomaly.router,   prefix=PREFIX, tags=["anomaly"], dependencies=[Depends(get_current_user)])
+app.include_router(analytics.router, prefix=PREFIX + "/analytics", tags=["analytics"], dependencies=[Depends(get_current_user)])
+app.include_router(charts.router,    prefix=PREFIX, tags=["charts"], dependencies=[Depends(get_current_user)])
 
 
 @app.get("/health")
@@ -165,12 +195,12 @@ async def monitor_status():
 
 
 @app.post("/api/dashboard/monitor/run")
-async def trigger_monitor_run(x_role: str = Header("analyst")):
+async def trigger_monitor_run(role: str = Depends(get_current_role)):
     """
     Manually triggers all background monitors immediately.
     Useful for on-demand agent scans from the UI.
     """
-    if x_role != "admin":
+    if role != "admin":
         raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can trigger manual monitor runs.")
     db = app.state.db
     results = {}

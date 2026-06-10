@@ -21,9 +21,10 @@ import os
 import logging
 import re
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
 import httpx
+from auth import get_current_role
 
 from database import get_db
 from models import (
@@ -257,7 +258,7 @@ async def get_proposals(
 async def approve_proposal(
     proposal_id: str,
     db: asyncpg.Pool = Depends(get_db),
-    x_role: str = Header("analyst"),
+    role: str = Depends(get_current_role),
 ):
     """
     Approve a pending proposal.
@@ -269,11 +270,11 @@ async def approve_proposal(
 
     If no thread_id (agent service was down), falls back to DB-only update.
     """
-    if x_role != "admin":
+    if role != "admin":
         raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can approve proposals.")
     if not _UUID_RE.match(proposal_id):
         raise HTTPException(status_code=400, detail="Invalid proposal ID format (expected UUID)")
-    result = await _update_proposal_status(db, proposal_id, "approved", user_role=x_role)
+    result = await _update_proposal_status(db, proposal_id, "approved", user_role=role)
 
     if result["via_langgraph"]:
         message = (
@@ -295,18 +296,18 @@ async def approve_proposal(
 async def reject_proposal(
     proposal_id: str,
     db: asyncpg.Pool = Depends(get_db),
-    x_role: str = Header("analyst"),
+    role: str = Depends(get_current_role),
 ):
     """
     Reject a pending proposal.
     Resumes the paused LangGraph graph with approved=False, which records
     the rejection in the graph state and terminates cleanly.
     """
-    if x_role != "admin":
+    if role != "admin":
         raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can reject proposals.")
     if not _UUID_RE.match(proposal_id):
         raise HTTPException(status_code=400, detail="Invalid proposal ID format (expected UUID)")
-    result = await _update_proposal_status(db, proposal_id, "rejected", feedback="Rejected by ops manager", user_role=x_role)
+    result = await _update_proposal_status(db, proposal_id, "rejected", feedback="Rejected by ops manager", user_role=role)
 
     if result["via_langgraph"]:
         message = f"Proposal rejected. LangGraph graph terminated cleanly."
