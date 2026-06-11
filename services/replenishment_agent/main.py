@@ -35,11 +35,67 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scai:scai_password@localhost:5432/supply_chain")
 
-tasks: Dict[str, Dict[str, Any]] = {}
+import json
+
+async def db_create_task(db: asyncpg.Pool, task_id: str, product_id: str | None, task_input: dict):
+    async with db.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO replenishment_tasks (task_id, product_id, status, created_at, input_payload, result_payload, error)
+            VALUES ($1, $2, 'pending', NOW(), $3, NULL, NULL)
+        """, task_id, product_id, json.dumps(task_input))
+
+async def db_get_task(db: asyncpg.Pool, task_id: str) -> dict | None:
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT task_id, status, created_at, input_payload, result_payload, error
+            FROM replenishment_tasks
+            WHERE task_id = $1
+        """, task_id)
+        if not row:
+            return None
+        
+        input_payload = row["input_payload"]
+        if isinstance(input_payload, str):
+            input_payload = json.loads(input_payload)
+        elif input_payload is None:
+            input_payload = {}
+            
+        result_payload = row["result_payload"]
+        if isinstance(result_payload, str):
+            result_payload = json.loads(result_payload)
+            
+        return {
+            "task_id": row["task_id"],
+            "status": row["status"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "input": input_payload,
+            "result": result_payload,
+            "error": row["error"]
+        }
+
+async def db_update_task_status(db: asyncpg.Pool, task_id: str, status: str, result: dict | None = None, error: str | None = None):
+    async with db.acquire() as conn:
+        if result is not None:
+            await conn.execute("""
+                UPDATE replenishment_tasks
+                SET status = $1, result_payload = $2, error = NULL
+                WHERE task_id = $3
+            """, status, json.dumps(result), task_id)
+        elif error is not None:
+            await conn.execute("""
+                UPDATE replenishment_tasks
+                SET status = $1, error = $2, result_payload = NULL
+                WHERE task_id = $3
+            """, status, error, task_id)
+        else:
+            await conn.execute("""
+                UPDATE replenishment_tasks
+                SET status = $1
+                WHERE task_id = $2
+            """, status, task_id)
+
 
 
 @asynccontextmanager
@@ -89,14 +145,11 @@ class ReplenishmentTaskInput(BaseModel):
 @app.post("/tasks")
 async def create_task(task_input: ReplenishmentTaskInput, background_tasks: BackgroundTasks):
     task_id = task_input.task_id or str(uuid.uuid4())
-    tasks[task_id] = {
-        "task_id": task_id,
-        "status": "pending",
-        "created_at": datetime.utcnow().isoformat(),
-        "input": task_input.model_dump(),
-        "result": None,
-        "error": None
-    }
+    db = app.state.db
+    
+    # Initialize task state in DB
+    await db_create_task(db, task_id, task_input.product_id, task_input.model_dump())
+    
     background_tasks.add_task(
         compute_replenishment,
         task_id=task_id,
@@ -107,14 +160,17 @@ async def create_task(task_input: ReplenishmentTaskInput, background_tasks: Back
 
 @app.get("/tasks/{task_id}")
 async def get_task(task_id: str):
-    if task_id not in tasks:
+    db = app.state.db
+    task = await db_get_task(db, task_id)
+    if not task:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    return tasks[task_id]
+    return task
 
 
 async def compute_replenishment(task_id: str, product_id: str | None):
     """Compute purchase orders for all products below reorder point."""
-    tasks[task_id]["status"] = "in_progress"
+    db = app.state.db
+    await db_update_task_status(db, task_id, "in_progress")
 
     try:
         pool = app.state.db
@@ -191,18 +247,17 @@ async def compute_replenishment(task_id: str, product_id: str | None):
             f"(lead time: {best_supplier['lead_time_days']} days)."
         )
 
-        tasks[task_id]["status"] = "completed"
-        tasks[task_id]["result"] = {
+        result_data = {
             "purchase_orders": purchase_orders,
             "summary": summary,
             "total_order_value": round(total_order_value, 2),
             "completed_at": datetime.utcnow().isoformat()
         }
+        await db_update_task_status(db, task_id, "completed", result=result_data)
 
     except Exception as e:
         logger.error(f"Replenishment task {task_id} failed: {e}")
-        tasks[task_id]["status"] = "failed"
-        tasks[task_id]["error"] = str(e)
+        await db_update_task_status(db, task_id, "failed", error=str(e))
 
 
 # ─────────────────────────────────────────────
@@ -237,10 +292,11 @@ async def execute_task(task_id: str):
     """
     Persist approved purchase orders to the DB and update inventory levels.
     """
-    if task_id not in tasks:
+    db = app.state.db
+    task = await db_get_task(db, task_id)
+    if not task:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-    task = tasks[task_id]
     if task["status"] != "completed":
         raise HTTPException(
             status_code=400,
@@ -253,10 +309,9 @@ async def execute_task(task_id: str):
     if not purchase_orders:
         return {"executed": 0, "message": "No purchase orders to apply."}
 
-    result = await _apply_purchase_orders(purchase_orders)
-    tasks[task_id]["status"] = "executed"
-    tasks[task_id]["executed_at"] = datetime.utcnow().isoformat()
-    return result
+    execution_result = await _apply_purchase_orders(purchase_orders)
+    await db_update_task_status(db, task_id, "executed")
+    return execution_result
 
 
 async def _apply_purchase_orders(purchase_orders: list) -> dict:

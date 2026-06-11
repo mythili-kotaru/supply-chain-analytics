@@ -45,9 +45,65 @@ logging.basicConfig(level=logging.INFO)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scai:scai_password@localhost:5432/supply_chain")
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
 
-# In-memory task store: task_id → task_state
-# In production: replace with Redis or Postgres
-tasks: Dict[str, Dict[str, Any]] = {}
+import json
+
+async def db_create_task(db: asyncpg.Pool, task_id: str, product_id: str | None, region: str | None, task_input: dict):
+    async with db.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO allocation_tasks (task_id, product_id, region, status, created_at, input_payload, result_payload, error)
+            VALUES ($1, $2, $3, 'pending', NOW(), $4, NULL, NULL)
+        """, task_id, product_id, region, json.dumps(task_input))
+
+async def db_get_task(db: asyncpg.Pool, task_id: str) -> dict | None:
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT task_id, status, created_at, input_payload, result_payload, error
+            FROM allocation_tasks
+            WHERE task_id = $1
+        """, task_id)
+        if not row:
+            return None
+        
+        input_payload = row["input_payload"]
+        if isinstance(input_payload, str):
+            input_payload = json.loads(input_payload)
+        elif input_payload is None:
+            input_payload = {}
+            
+        result_payload = row["result_payload"]
+        if isinstance(result_payload, str):
+            result_payload = json.loads(result_payload)
+            
+        return {
+            "task_id": row["task_id"],
+            "status": row["status"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "input": input_payload,
+            "result": result_payload,
+            "error": row["error"]
+        }
+
+async def db_update_task_status(db: asyncpg.Pool, task_id: str, status: str, result: dict | None = None, error: str | None = None):
+    async with db.acquire() as conn:
+        if result is not None:
+            await conn.execute("""
+                UPDATE allocation_tasks
+                SET status = $1, result_payload = $2, error = NULL
+                WHERE task_id = $3
+            """, status, json.dumps(result), task_id)
+        elif error is not None:
+            await conn.execute("""
+                UPDATE allocation_tasks
+                SET status = $1, error = $2, result_payload = NULL
+                WHERE task_id = $3
+            """, status, error, task_id)
+        else:
+            await conn.execute("""
+                UPDATE allocation_tasks
+                SET status = $1
+                WHERE task_id = $2
+            """, status, task_id)
+
 
 
 # ─────────────────────────────────────────────
@@ -126,16 +182,10 @@ async def create_task(task_input: AllocationTaskInput, background_tasks: Backgro
     The caller gets back the task_id and polls GET /tasks/{id} for status.
     """
     task_id = task_input.task_id or str(uuid.uuid4())
+    db = app.state.db
 
-    # Initialize task state
-    tasks[task_id] = {
-        "task_id": task_id,
-        "status": "pending",
-        "created_at": datetime.utcnow().isoformat(),
-        "input": task_input.model_dump(),
-        "result": None,
-        "error": None
-    }
+    # Initialize task state in DB
+    await db_create_task(db, task_id, task_input.product_id, task_input.region, task_input.model_dump())
 
     # Kick off the allocation computation in the background
     # FastAPI's BackgroundTasks runs this after the response is sent
@@ -155,9 +205,11 @@ async def create_task(task_input: AllocationTaskInput, background_tasks: Backgro
 # ─────────────────────────────────────────────
 @app.get("/tasks/{task_id}")
 async def get_task(task_id: str):
-    if task_id not in tasks:
+    db = app.state.db
+    task = await db_get_task(db, task_id)
+    if not task:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    return tasks[task_id]
+    return task
 
 
 # ─────────────────────────────────────────────
@@ -172,7 +224,8 @@ async def get_task(task_id: str):
 # ─────────────────────────────────────────────
 async def compute_allocation(task_id: str, product_id: str | None, region: str | None):
     """Background task: compute the allocation plan and update task state."""
-    tasks[task_id]["status"] = "in_progress"
+    db = app.state.db
+    await db_update_task_status(db, task_id, "in_progress")
     logger.info(f"Computing allocation for task {task_id}")
 
     try:
@@ -241,20 +294,19 @@ async def compute_allocation(task_id: str, product_id: str | None, region: str |
             f"{len(deficits)} location(s) below reorder point identified."
         )
 
-        tasks[task_id]["status"] = "completed"
-        tasks[task_id]["result"] = {
+        result_data = {
             "allocation_plan": allocation_plan,
             "summary": summary,
             "total_units_transferred": total_transferred,
             "deficits_found": len(deficits),
             "completed_at": datetime.utcnow().isoformat()
         }
+        await db_update_task_status(db, task_id, "completed", result=result_data)
         logger.info(f"Allocation task {task_id} completed: {len(allocation_plan)} transfers")
 
     except Exception as e:
         logger.error(f"Allocation task {task_id} failed: {e}")
-        tasks[task_id]["status"] = "failed"
-        tasks[task_id]["error"] = str(e)
+        await db_update_task_status(db, task_id, "failed", error=str(e))
 
 
 # ─────────────────────────────────────────────
@@ -295,10 +347,11 @@ async def execute_task(task_id: str):
     Apply the allocation plan from a completed task to the inventory table.
     Only callable after the task is in 'completed' status.
     """
-    if task_id not in tasks:
+    db = app.state.db
+    task = await db_get_task(db, task_id)
+    if not task:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-    task = tasks[task_id]
     if task["status"] != "completed":
         raise HTTPException(
             status_code=400,
@@ -311,10 +364,9 @@ async def execute_task(task_id: str):
     if not allocation_plan:
         return {"executed": 0, "message": "No transfers to apply."}
 
-    result = await _apply_allocation_plan(allocation_plan)
-    tasks[task_id]["status"] = "executed"
-    tasks[task_id]["executed_at"] = datetime.utcnow().isoformat()
-    return result
+    execution_result = await _apply_allocation_plan(allocation_plan)
+    await db_update_task_status(db, task_id, "executed")
+    return execution_result
 
 
 async def _apply_allocation_plan(allocation_plan: list) -> dict:
