@@ -19,6 +19,16 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Activity, ChevronDown, ChevronUp, CheckCircle, XCircle, Minus, RefreshCw, TrendingDown } from "lucide-react";
+
+const ActivityIcon = Activity as any;
+const ChevronDownIcon = ChevronDown as any;
+const ChevronUpIcon = ChevronUp as any;
+const CheckCircleIcon = CheckCircle as any;
+const XCircleIcon = XCircle as any;
+const MinusIcon = Minus as any;
+const RefreshCwIcon = RefreshCw as any;
+const TrendingDownIcon = TrendingDown as any;
+
 import { api } from "@/lib/api";
 import type { DriftRecord, DriftHistory } from "@/types";
 
@@ -258,7 +268,7 @@ export function DriftPanel() {
         onClick={() => setCollapsed((c) => !c)}
       >
         <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-violet-400" />
+          <ActivityIcon className="w-4 h-4 text-violet-400" />
           <h2 className="text-sm font-semibold text-white">Drift Detection</h2>
           <span className="text-[10px] text-slate-500">— Hyperparameter Tuning Outcomes</span>
         </div>
@@ -268,16 +278,16 @@ export function DriftPanel() {
           {!loading && records.length > 0 && (
             <div className="flex items-center gap-2 text-[11px]">
               <span className="flex items-center gap-1 text-emerald-400">
-                <CheckCircle className="w-3 h-3" /> {improvedCount} improved
+                <CheckCircleIcon className="w-3 h-3" /> {improvedCount} improved
               </span>
               {worsenedCount > 0 && (
                 <span className="flex items-center gap-1 text-red-400">
-                  <XCircle className="w-3 h-3" /> {worsenedCount} worsened
+                  <XCircleIcon className="w-3 h-3" /> {worsenedCount} worsened
                 </span>
               )}
               {pendingCount > 0 && (
                 <span className="flex items-center gap-1 text-slate-500">
-                  <Minus className="w-3 h-3" /> {pendingCount} pending
+                  <MinusIcon className="w-3 h-3" /> {pendingCount} pending
                 </span>
               )}
             </div>
@@ -289,12 +299,12 @@ export function DriftPanel() {
             className="p-1.5 rounded-lg hover:bg-slate-800 border border-slate-800 transition-colors"
             title="Refresh drift data"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${refreshing ? "animate-spin" : ""}`} />
+            <RefreshCwIcon className={`w-3.5 h-3.5 text-slate-400 ${refreshing ? "animate-spin" : ""}`} />
           </button>
 
           {collapsed
-            ? <ChevronDown className="w-4 h-4 text-slate-500" />
-            : <ChevronUp   className="w-4 h-4 text-slate-500" />
+            ? <ChevronDownIcon className="w-4 h-4 text-slate-500" />
+            : <ChevronUpIcon   className="w-4 h-4 text-slate-500" />
           }
         </div>
       </div>
@@ -303,11 +313,11 @@ export function DriftPanel() {
       {!collapsed && (
         loading ? (
           <div className="flex items-center gap-2 px-4 py-6 text-slate-500 text-sm">
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading drift data…
+            <RefreshCwIcon className="w-3.5 h-3.5 animate-spin" /> Loading drift data…
           </div>
         ) : records.length === 0 ? (
           <div className="flex items-center gap-2 px-4 py-6 text-slate-500 text-sm">
-            <TrendingDown className="w-4 h-4" />
+            <TrendingDownIcon className="w-4 h-4" />
             No tuning rounds recorded yet. Approve a forecast_tuning proposal to see drift data here.
           </div>
         ) : (
@@ -388,12 +398,12 @@ export function DriftPanel() {
 
                     {/* Improved icon */}
                     <div className="col-span-1 flex justify-center items-center gap-1">
-                      {rec.improved === true  && <CheckCircle className="w-4 h-4 text-emerald-400" />}
-                      {rec.improved === false && <XCircle     className="w-4 h-4 text-red-400"     />}
-                      {rec.improved === null  && <Minus       className="w-4 h-4 text-slate-500"   />}
+                      {rec.improved === true  && <CheckCircleIcon className="w-4 h-4 text-emerald-400" />}
+                      {rec.improved === false && <XCircleIcon     className="w-4 h-4 text-red-400"     />}
+                      {rec.improved === null  && <MinusIcon       className="w-4 h-4 text-slate-500"   />}
                       {isExpanded
-                        ? <ChevronUp   className="w-3 h-3 text-slate-600" />
-                        : <ChevronDown className="w-3 h-3 text-slate-600" />}
+                        ? <ChevronUpIcon   className="w-3 h-3 text-slate-600" />
+                        : <ChevronDownIcon className="w-3 h-3 text-slate-600" />}
                     </div>
                   </div>
 

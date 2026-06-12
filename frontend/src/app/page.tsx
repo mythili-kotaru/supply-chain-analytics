@@ -14,6 +14,11 @@ import { CategoryCapacityBarChart } from "@/components/CategoryCapacityBarChart"
 import { api } from "@/lib/api";
 import type { Proposal, DashboardStats, InventoryAlert, ForecastAlert } from "@/types";
 import { RefreshCw, Search, Loader2 } from "lucide-react";
+
+const RefreshCwIcon = RefreshCw as any;
+const SearchIcon = Search as any;
+const Loader2Icon = Loader2 as any;
+
 import { LoginPanel } from "@/components/LoginPanel";
 
 // ─────────────────────────────────────────────
@@ -174,9 +179,9 @@ export default function DashboardPage() {
       const matchesFilter = activeFilter === "all" ? true : p.status === activeFilter;
       const q = searchQuery.toLowerCase();
       const matchesSearch = q === "" || 
-        p.product_name?.toLowerCase().includes(q) || 
-        p.action_type.toLowerCase().includes(q) ||
-        p.location?.toLowerCase().includes(q);
+        p.trigger?.product_name?.toLowerCase().includes(q) || 
+        p.type?.toLowerCase().includes(q) ||
+        p.trigger?.location?.toLowerCase().includes(q);
       return matchesFilter && matchesSearch;
     });
   }, [proposals, activeFilter, searchQuery]);
@@ -184,7 +189,7 @@ export default function DashboardPage() {
   if (loadingToken) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+        <Loader2Icon className="w-8 h-8 text-blue-500 animate-spin" />
       </div>
     );
   }
@@ -211,7 +216,7 @@ export default function DashboardPage() {
               onClick={handleRefresh}
               className="btn-approve mx-auto"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCwIcon className="w-3.5 h-3.5" />
               Retry
             </button>
           </div>
@@ -275,7 +280,7 @@ export default function DashboardPage() {
               <div className="flex items-center gap-2">
                 {/* Search */}
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <SearchIcon className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     placeholder="Search proposals..."
@@ -308,7 +313,7 @@ export default function DashboardPage() {
                   className="p-1.5 rounded-lg hover:bg-slate-800 border border-slate-800 transition-colors"
                   title="Refresh proposals"
                 >
-                  <RefreshCw
+                  <RefreshCwIcon
                     className={`w-3.5 h-3.5 text-slate-400 ${refreshing ? "animate-spin" : ""}`}
                   />
                 </button>

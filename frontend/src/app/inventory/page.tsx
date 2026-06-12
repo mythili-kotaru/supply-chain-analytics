@@ -6,6 +6,13 @@ import { api } from "@/lib/api";
 import type { DashboardStats, InventoryAlert } from "@/types";
 import { Search, Filter, Box, Package, AlertTriangle, CheckCircle2 } from "lucide-react";
 
+const SearchIcon = Search as any;
+const FilterIcon = Filter as any;
+const BoxIcon = Box as any;
+const PackageIcon = Package as any;
+const AlertTriangleIcon = AlertTriangle as any;
+const CheckCircle2Icon = CheckCircle2 as any;
+
 const EMPTY_STATS: DashboardStats = {
   critical_alerts: 0,
   pending_approvals: 0,
@@ -62,7 +69,7 @@ export default function InventoryPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              <Package className="w-6 h-6 text-indigo-400" />
+              <PackageIcon className="w-6 h-6 text-indigo-400" />
               Global Inventory
             </h1>
             <p className="text-slate-400 text-sm mt-1">
@@ -88,7 +95,7 @@ export default function InventoryPage() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col lg:flex-row gap-4 items-center justify-between shadow-lg">
           
           <div className="relative w-full lg:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             <input
               type="text"
               placeholder="Search by product name or ID..."
@@ -99,7 +106,7 @@ export default function InventoryPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-            <Filter className="w-4 h-4 text-slate-500 hidden sm:block" />
+            <FilterIcon className="w-4 h-4 text-slate-500 hidden sm:block" />
             
             <select
               value={categoryFilter}
@@ -141,7 +148,7 @@ export default function InventoryPage() {
             </div>
           ) : filteredInventory.length === 0 ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 gap-3">
-              <Box className="w-12 h-12 opacity-20" />
+              <BoxIcon className="w-12 h-12 opacity-20" />
               <p>No inventory items match your filters.</p>
             </div>
           ) : (
@@ -193,17 +200,17 @@ export default function InventoryPage() {
                       <td className="px-6 py-4">
                         {item.status === 'OK' ? (
                           <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-400/10 px-2.5 py-1 rounded-full w-max text-xs font-medium border border-emerald-400/20">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <CheckCircle2Icon className="w-3.5 h-3.5" />
                             Healthy
                           </div>
                         ) : item.status === 'LOW' ? (
                           <div className="flex items-center gap-1.5 text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded-full w-max text-xs font-medium border border-amber-400/20">
-                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <AlertTriangleIcon className="w-3.5 h-3.5" />
                             Low Stock
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5 text-red-400 bg-red-400/10 px-2.5 py-1 rounded-full w-max text-xs font-medium border border-red-400/20 shadow-[0_0_10px_rgba(239,68,68,0.2)]">
-                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <AlertTriangleIcon className="w-3.5 h-3.5" />
                             Critical
                           </div>
                         )}

@@ -1,6 +1,12 @@
 "use client";
 
 import { Package, MapPin, TrendingDown, AlertTriangle } from "lucide-react";
+
+const PackageIcon = Package as any;
+const MapPinIcon = MapPin as any;
+const TrendingDownIcon = TrendingDown as any;
+const AlertTriangleIcon = AlertTriangle as any;
+
 import type { InventoryAlert } from "@/types";
 
 interface InventoryAlertsFeedProps {
@@ -63,7 +69,7 @@ export function InventoryAlertsFeed({ alerts }: InventoryAlertsFeedProps) {
         </div>
         {criticalCount > 0 ? (
           <span className="badge-critical flex items-center gap-1">
-            <AlertTriangle className="w-3 h-3" />
+            <AlertTriangleIcon className="w-3 h-3" />
             {criticalCount} critical
           </span>
         ) : (
@@ -105,11 +111,11 @@ export function InventoryAlertsFeed({ alerts }: InventoryAlertsFeedProps) {
                     <p className="text-sm font-semibold text-white truncate">{alert.product_name}</p>
                     <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-400">
                       <span className="flex items-center gap-1">
-                        <MapPin className="w-3 h-3" />
+                        <MapPinIcon className="w-3 h-3" />
                         {alert.location}
                       </span>
                       <span className="flex items-center gap-1 text-slate-600">
-                        <Package className="w-3 h-3" />
+                        <PackageIcon className="w-3 h-3" />
                         {alert.product_id}
                       </span>
                     </div>
@@ -122,7 +128,7 @@ export function InventoryAlertsFeed({ alerts }: InventoryAlertsFeedProps) {
                       <span className="text-slate-500 font-normal"> / {alert.reorder_point}</span>
                     </p>
                     <div className="flex items-center gap-1 justify-end mt-0.5">
-                      <TrendingDown className="w-3 h-3 text-red-400" />
+                      <TrendingDownIcon className="w-3 h-3 text-red-400" />
                       <span className={`text-xs font-semibold ${
                         deficitPct > 60 ? "text-red-400" : "text-orange-400"
                       }`}>

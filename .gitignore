@@ -36,3 +36,8 @@ pgdata/
 
 # Logs
 *.log
+
+# SQLite databases
+*.db
+*.db-journal
+

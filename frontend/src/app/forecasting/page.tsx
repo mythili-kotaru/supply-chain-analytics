@@ -6,6 +6,13 @@ import { api } from "@/lib/api";
 import type { DashboardStats, ForecastAlert, DriftRecord } from "@/types";
 import { LineChart, Settings2, AlertTriangle, TrendingUp, TrendingDown, Info } from "lucide-react";
 
+const LineChartIcon = LineChart as any;
+const Settings2Icon = Settings2 as any;
+const AlertTriangleIcon = AlertTriangle as any;
+const TrendingUpIcon = TrendingUp as any;
+const TrendingDownIcon = TrendingDown as any;
+const InfoIcon = Info as any;
+
 const EMPTY_STATS: DashboardStats = {
   critical_alerts: 0,
   pending_approvals: 0,
@@ -46,7 +53,7 @@ export default function ForecastingPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              <LineChart className="w-6 h-6 text-fuchsia-400" />
+              <LineChartIcon className="w-6 h-6 text-fuchsia-400" />
               Forecasting Models
             </h1>
             <p className="text-slate-400 text-sm mt-1">
@@ -71,14 +78,14 @@ export default function ForecastingPage() {
         {/* Forecast Alerts Grid */}
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
+            <AlertTriangleIcon className="w-5 h-5 text-amber-500" />
             Accuracy Alerts (MAPE &gt; 15%)
           </h2>
           {loading ? (
             <div className="h-32 bg-slate-900 rounded-xl animate-pulse" />
           ) : alerts.length === 0 ? (
             <div className="bg-emerald-500/10 border border-emerald-500/20 p-6 rounded-xl flex items-center justify-center text-emerald-400 gap-2">
-              <Info className="w-5 h-5" />
+              <InfoIcon className="w-5 h-5" />
               <p>All forecasting models are operating within acceptable accuracy bounds.</p>
             </div>
           ) : (
@@ -119,7 +126,7 @@ export default function ForecastingPage() {
         {/* Model Drift History Table */}
         <div className="space-y-4 pt-6">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Settings2 className="w-5 h-5 text-slate-400" />
+            <Settings2Icon className="w-5 h-5 text-slate-400" />
             AI Hyperparameter Tuning Log
           </h2>
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
@@ -180,12 +187,12 @@ export default function ForecastingPage() {
                             <span className="text-slate-500 italic text-xs">Awaiting evaluation...</span>
                           ) : drift.improved ? (
                             <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                              <TrendingDown className="w-4 h-4" />
+                              <TrendingDownIcon className="w-4 h-4" />
                               -{drift.mape_delta_pct?.toFixed(1)}%
                             </div>
                           ) : (
                             <div className="flex items-center gap-1.5 text-red-400 font-medium">
-                              <TrendingUp className="w-4 h-4" />
+                              <TrendingUpIcon className="w-4 h-4" />
                               +{drift.mape_delta_pct?.toFixed(1)}%
                             </div>
                           )}

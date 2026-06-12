@@ -6,6 +6,12 @@ import { api } from "@/lib/api";
 import type { DashboardStats, Proposal } from "@/types";
 import { ShoppingCart, ArrowRightLeft, Truck, CheckCircle2, Clock } from "lucide-react";
 
+const ShoppingCartIcon = ShoppingCart as any;
+const ArrowRightLeftIcon = ArrowRightLeft as any;
+const TruckIcon = Truck as any;
+const CheckCircle2Icon = CheckCircle2 as any;
+const ClockIcon = Clock as any;
+
 const EMPTY_STATS: DashboardStats = {
   critical_alerts: 0,
   pending_approvals: 0,
@@ -45,7 +51,7 @@ export default function OrdersPage() {
   }, [replenishments]);
 
   const totalTransfers = useMemo(() => {
-    return allocations.reduce((acc, p) => acc + (p.allocation?.total_units_transferred || p.allocation?.total_units || 0), 0);
+    return allocations.reduce((acc, p) => acc + ((p.allocation as any)?.total_units_transferred || (p.allocation as any)?.total_units || 0), 0);
   }, [allocations]);
 
   return (
@@ -58,7 +64,7 @@ export default function OrdersPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              <ShoppingCart className="w-6 h-6 text-sky-400" />
+              <ShoppingCartIcon className="w-6 h-6 text-sky-400" />
               Active Orders & Transfers
             </h1>
             <p className="text-slate-400 text-sm mt-1">
@@ -83,7 +89,7 @@ export default function OrdersPage() {
         {/* Purchase Orders Section */}
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Truck className="w-5 h-5 text-emerald-500" />
+            <TruckIcon className="w-5 h-5 text-emerald-500" />
             Purchase Orders (Replenishments)
           </h2>
           
@@ -115,14 +121,14 @@ export default function OrdersPage() {
                         <tr key={`${p.id}-${idx}`} className="hover:bg-slate-800/20 transition-colors">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-400/10 px-2.5 py-1 rounded-full w-max text-xs font-medium border border-emerald-400/20">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <CheckCircle2Icon className="w-3.5 h-3.5" />
                               Approved
                             </div>
                           </td>
                           <td className="px-6 py-4">
                             <p className="font-mono text-slate-300 font-semibold">{po.po_number}</p>
                             <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
+                              <ClockIcon className="w-3 h-3" />
                               ETA: {po.expected_delivery} ({po.lead_time_days} days)
                             </p>
                           </td>
@@ -152,7 +158,7 @@ export default function OrdersPage() {
         {/* Transfers Section */}
         <div className="space-y-4 pt-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <ArrowRightLeft className="w-5 h-5 text-sky-500" />
+            <ArrowRightLeftIcon className="w-5 h-5 text-sky-500" />
             Inter-Warehouse Transfers (Allocations)
           </h2>
           
@@ -179,11 +185,11 @@ export default function OrdersPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-800/50">
                     {allocations.flatMap(p => 
-                      (p.allocation?.transfers || p.allocation?.allocation_plan || []).map((transfer, idx) => (
+                      ((p.allocation as any)?.transfers || (p.allocation as any)?.allocation_plan || []).map((transfer: any, idx: number) => (
                         <tr key={`${p.id}-${idx}`} className="hover:bg-slate-800/20 transition-colors">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-1.5 text-sky-400 bg-sky-400/10 px-2.5 py-1 rounded-full w-max text-xs font-medium border border-sky-400/20">
-                              <Truck className="w-3.5 h-3.5" />
+                              <TruckIcon className="w-3.5 h-3.5" />
                               In Transit
                             </div>
                           </td>
@@ -196,7 +202,7 @@ export default function OrdersPage() {
                               <span className="text-slate-300 bg-slate-800 px-2 py-1 rounded text-xs">
                                 {transfer.from_location}
                               </span>
-                              <ArrowRightLeft className="w-3 h-3 text-slate-500" />
+                              <ArrowRightLeftIcon className="w-3 h-3 text-slate-500" />
                               <span className="text-slate-300 bg-slate-800 px-2 py-1 rounded text-xs">
                                 {transfer.to_location}
                               </span>

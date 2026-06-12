@@ -22,6 +22,7 @@ import logging
 import re
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 import asyncpg
 import httpx
 from auth import get_current_role
@@ -318,4 +319,106 @@ async def reject_proposal(
         id=proposal_id,
         status="rejected",
         message=message,
+    )
+
+
+async def resume_proxy_stream(
+    db: asyncpg.Pool,
+    proposal_id: str,
+    approved: bool,
+    feedback: str = "",
+    user_role: str = "admin",
+):
+    row = await db.fetchrow(
+        "SELECT id, status, thread_id, type FROM proposals WHERE id = $1",
+        proposal_id,
+    )
+    if not row:
+        yield f"data: {json.dumps({'event': 'error', 'message': f'Proposal {proposal_id} not found'})}\n\n"
+        return
+    if row["status"] != "pending":
+        current_status = row["status"]
+        yield f"data: {json.dumps({'event': 'error', 'message': f'Proposal {proposal_id} is already {current_status} — cannot change status'})}\n\n"
+        return
+
+    thread_id = row["thread_id"]
+    new_status = "approved" if approved else "rejected"
+
+    if thread_id:
+        payload = {
+            "proposal_id": proposal_id,
+            "thread_id": thread_id,
+            "approved": approved,
+            "feedback": feedback,
+            "user_role": user_role,
+        }
+        logger.info(f"Streaming LangGraph resume for proposal {proposal_id} via thread {thread_id}")
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream("POST", f"{LANGGRAPH_AGENT_URL}/resume/stream", json=payload) as response:
+                    if response.status_code == 200:
+                        async for line in response.aiter_lines():
+                            yield line + "\n"
+                        return
+                    else:
+                        err_body = await response.aread()
+                        logger.error(f"langgraph_agent stream returned status {response.status_code}: {err_body.decode()}")
+                        yield f"data: {json.dumps({'event': 'thought', 'message': 'LangGraph agent stream returned error. Falling back to direct database update...'})}\n\n"
+        except Exception as e:
+            logger.error(f"Error calling langgraph_agent resume/stream: {e}")
+            yield f"data: {json.dumps({'event': 'thought', 'message': f'LangGraph agent service offline ({type(e).__name__}). Falling back to direct database update...'})}\n\n"
+
+    # Fallback to direct DB update path
+    yield f"data: {json.dumps({'event': 'thought', 'message': f'Flipping proposal status directly in database to: {new_status}'})}\n\n"
+    await db.execute(
+        "UPDATE proposals SET status = $1 WHERE id = $2",
+        new_status, proposal_id,
+    )
+    complete_data = {
+        "event": "complete",
+        "proposal_id": proposal_id,
+        "thread_id": thread_id,
+        "approved": approved,
+        "status": "executed" if approved else "rejected",
+        "final_message": f"Proposal status updated directly to {new_status}.",
+        "nodes_visited": []
+    }
+    yield f"data: {json.dumps(complete_data)}\n\n"
+
+
+@router.post("/proposals/{proposal_id}/approve/stream")
+async def approve_proposal_stream(
+    proposal_id: str,
+    db: asyncpg.Pool = Depends(get_db),
+    role: str = Depends(get_current_role),
+):
+    """
+    Approve proposal and return a real-time event stream.
+    """
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can approve proposals.")
+    if not _UUID_RE.match(proposal_id):
+        raise HTTPException(status_code=400, detail="Invalid proposal ID format (expected UUID)")
+    return StreamingResponse(
+        resume_proxy_stream(db, proposal_id, approved=True, feedback="", user_role=role),
+        media_type="text/event-stream"
+    )
+
+
+@router.post("/proposals/{proposal_id}/reject/stream")
+async def reject_proposal_stream(
+    proposal_id: str,
+    db: asyncpg.Pool = Depends(get_db),
+    role: str = Depends(get_current_role),
+):
+    """
+    Reject proposal and return a real-time event stream.
+    """
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can reject proposals.")
+    if not _UUID_RE.match(proposal_id):
+        raise HTTPException(status_code=400, detail="Invalid proposal ID format (expected UUID)")
+    return StreamingResponse(
+        resume_proxy_stream(db, proposal_id, approved=False, feedback="Rejected by ops manager", user_role=role),
+        media_type="text/event-stream"
     )

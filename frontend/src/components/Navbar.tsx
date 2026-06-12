@@ -2,8 +2,16 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+const LinkComponent = Link as any;
+
 import { usePathname } from "next/navigation";
 import { Activity, Bell, ChevronDown, Zap } from "lucide-react";
+
+const ActivityIcon = Activity as any;
+const BellIcon = Bell as any;
+const ChevronDownIcon = ChevronDown as any;
+const ZapIcon = Zap as any;
+
 import type { DashboardStats } from "@/types";
 import { UserProfilePanel } from "@/components/UserProfilePanel";
 
@@ -47,7 +55,7 @@ export function Navbar({ stats }: NavbarProps) {
       {/* Logo / Brand */}
       <div className="flex items-center gap-2.5 mr-4">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
-          <Zap className="w-4 h-4 text-white" />
+          <ZapIcon className="w-4 h-4 text-white" />
         </div>
         <div>
           <span className="text-sm font-bold text-white tracking-tight">SupplyChain</span>
@@ -63,7 +71,7 @@ export function Navbar({ stats }: NavbarProps) {
         {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href;
           return (
-            <Link
+            <LinkComponent
               key={item.name}
               href={item.href}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
@@ -73,7 +81,7 @@ export function Navbar({ stats }: NavbarProps) {
               }`}
             >
               {item.name}
-            </Link>
+            </LinkComponent>
           );
         })}
       </nav>
@@ -90,13 +98,13 @@ export function Navbar({ stats }: NavbarProps) {
         }`}
       >
         <span className={`w-1.5 h-1.5 rounded-full live-dot ${allHealthy ? "bg-emerald-400" : "bg-red-400"}`} />
-        <Activity className="w-3 h-3" />
+        <ActivityIcon className="w-3 h-3" />
         <span className="font-medium">{allHealthy ? "All systems operational" : "Degraded"}</span>
       </div>
 
       {/* Pending approvals badge */}
       <button className="relative p-2 rounded-lg hover:bg-slate-800 transition-colors">
-        <Bell className="w-4 h-4 text-slate-400" />
+        <BellIcon className="w-4 h-4 text-slate-400" />
         {stats.pending_approvals > 0 && (
           <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center">
             {stats.pending_approvals}
@@ -117,7 +125,7 @@ export function Navbar({ stats }: NavbarProps) {
             <p className="text-xs font-medium text-white leading-none">{userName}</p>
             <p className="text-[10px] text-slate-500 leading-none mt-0.5 capitalize">{role}</p>
           </div>
-          <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${profileOpen ? "rotate-180" : ""}`} />
+          <ChevronDownIcon className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${profileOpen ? "rotate-180" : ""}`} />
         </button>
 
         {profileOpen && (

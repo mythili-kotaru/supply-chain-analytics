@@ -4,7 +4,21 @@ import { useState, useEffect } from "react";
 import { Navbar } from "@/components/Navbar";
 import { api } from "@/lib/api";
 import type { DashboardStats } from "@/types";
-import { MessageSquare, Database, Sparkles, Loader2, Code2, Play } from "lucide-react";
+import { 
+  MessageSquare, 
+  Database, 
+  Sparkles, 
+  Loader2, 
+  Code2, 
+  Play 
+} from "lucide-react";
+
+const MessageSquareIcon = MessageSquare as any;
+const DatabaseIcon = Database as any;
+const SparklesIcon = Sparkles as any;
+const Loader2Icon = Loader2 as any;
+const Code2Icon = Code2 as any;
+const PlayIcon = Play as any;
 
 const EMPTY_STATS: DashboardStats = {
   critical_alerts: 0,
@@ -73,7 +87,7 @@ export default function AnalyticsPage() {
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-blue-400" />
+            <SparklesIcon className="w-6 h-6 text-blue-400" />
             AI Supply Chain Analytics
           </h1>
           <p className="text-slate-400 text-sm mt-1">
@@ -84,7 +98,7 @@ export default function AnalyticsPage() {
         {/* Search Bar */}
         <form onSubmit={handleSearch} className="relative">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <MessageSquare className="h-5 w-5 text-slate-500" />
+            <MessageSquareIcon className="h-5 w-5 text-slate-500" />
           </div>
           <input
             type="text"
@@ -99,7 +113,7 @@ export default function AnalyticsPage() {
               disabled={loading || !query.trim()}
               className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              {loading ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
               Analyze
             </button>
           </div>
@@ -124,7 +138,7 @@ export default function AnalyticsPage() {
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 relative overflow-hidden">
                   <div className="absolute top-0 right-0 p-32 bg-blue-500/5 blur-[100px] rounded-full pointer-events-none" />
                   <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-blue-400" />
+                    <SparklesIcon className="w-4 h-4 text-blue-400" />
                     AI Insight
                   </h3>
                   <p className="text-lg text-slate-100 leading-relaxed font-light">
@@ -136,7 +150,7 @@ export default function AnalyticsPage() {
                 <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50">
                     <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-                      <Database className="w-4 h-4 text-emerald-400" />
+                      <DatabaseIcon className="w-4 h-4 text-emerald-400" />
                       Data Source ({result.result_count} rows)
                     </h3>
                     <button
@@ -147,7 +161,7 @@ export default function AnalyticsPage() {
                           : "bg-transparent text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-300"
                       }`}
                     >
-                      <Code2 className="w-3.5 h-3.5" />
+                      <Code2Icon className="w-3.5 h-3.5" />
                       {showSql ? "Hide SQL" : "View SQL"}
                     </button>
                   </div>

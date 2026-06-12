@@ -37,6 +37,7 @@ import os
 import random
 import uuid
 from datetime import datetime
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ async def trigger_replenishment(
         return resp.json().get("task_id", task_id)
 
 
-async def poll_task(agent_type: str, task_id: str) -> dict | None:
+async def poll_task(agent_type: str, task_id: str, config: Optional[dict] = None) -> dict | None:
     """
     Poll an A2A agent until the task completes or fails.
 
@@ -137,6 +138,7 @@ async def poll_task(agent_type: str, task_id: str) -> dict | None:
     Args:
         agent_type: 'allocation' or 'replenishment'
         task_id: The task UUID returned by trigger_*
+        config: Optional LangGraph configuration dict.
 
     Returns:
         The result dict from the agent, or None if failed/timed out.
@@ -145,6 +147,7 @@ async def poll_task(agent_type: str, task_id: str) -> dict | None:
         return None
 
     base_url = ALLOCATION_AGENT_URL if agent_type == "allocation" else REPLENISHMENT_AGENT_URL
+    queue = config.get("configurable", {}).get("stream_queue") if config else None
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         for attempt in range(MAX_POLL_ATTEMPTS):
@@ -155,6 +158,11 @@ async def poll_task(agent_type: str, task_id: str) -> dict | None:
                 status = data.get("status")
 
                 logger.info(f"Poll {agent_type} task {task_id}: status={status} (attempt {attempt+1})")
+                if queue:
+                    await queue.put({
+                        "event": "thought",
+                        "message": f"Polling {agent_type} task status: {status.upper()} (attempt {attempt+1}/{MAX_POLL_ATTEMPTS})"
+                    })
 
                 if status == "completed":
                     return data.get("result")
@@ -165,6 +173,11 @@ async def poll_task(agent_type: str, task_id: str) -> dict | None:
 
             except httpx.RequestError as e:
                 logger.warning(f"Poll attempt {attempt+1} failed: {e}")
+                if queue:
+                    await queue.put({
+                        "event": "thought",
+                        "message": f"Polling {agent_type} attempt {attempt+1} encountered connection error: {str(e)}"
+                    })
 
             # Exponential backoff with jitter: 1.5, 3, 6, 10, 10, ...
             wait = min(POLL_BASE_INTERVAL * (2 ** attempt), POLL_MAX_INTERVAL)
@@ -172,4 +185,9 @@ async def poll_task(agent_type: str, task_id: str) -> dict | None:
             await asyncio.sleep(wait)
 
     logger.error(f"Task {task_id} timed out after {MAX_POLL_ATTEMPTS} attempts")
+    if queue:
+        await queue.put({
+            "event": "thought",
+            "message": f"A2A {agent_type} task timed out after {MAX_POLL_ATTEMPTS} attempts."
+        })
     return {"error": "Task timed out", "status": "timeout"}

@@ -44,6 +44,8 @@ import json
 import logging
 import httpx
 import asyncpg
+from typing import Any, Optional
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
@@ -86,7 +88,7 @@ forecasting_llm = ChatOpenAI(
 # This is the brain that decides what to do with each user query.
 # It outputs next_action, which the conditional edge reads.
 # ─────────────────────────────────────────────
-async def supervisor_node(state: SupplyChainState) -> dict:
+async def supervisor_node(state: SupplyChainState, config: Optional[RunnableConfig] = None) -> dict:
     """
     Classify user intent and route to the appropriate sub-graph.
 
@@ -97,6 +99,9 @@ async def supervisor_node(state: SupplyChainState) -> dict:
       - replenishment: "reorder sunscreen", "create purchase order"
       - done: "thank you", "that's all" (end conversation)
     """
+    queue = config.get("configurable", {}).get("stream_queue") if config else None
+    if queue:
+        await queue.put({"event": "thought", "message": f"Supervisor analyzing intent for query: '{state['user_query']}'"})
     system_prompt = """You are a supply chain AI supervisor.
 Your only job is to classify the user's query into one of these intents:
 - sql_insights: questions about revenue, stock, orders, shipping, analytics
@@ -133,11 +138,14 @@ Do not include any other text."""
 # ─────────────────────────────────────────────
 # NODE 2: SQL INSIGHTS PIPELINE
 # ─────────────────────────────────────────────
-async def sql_insights_node(state: SupplyChainState) -> dict:
+async def sql_insights_node(state: SupplyChainState, config: Optional[RunnableConfig] = None) -> dict:
     """
     3-node sub-pipeline: Parse → SQL Gen → Format
     Returns formatted insight + raw SQL results.
     """
+    queue = config.get("configurable", {}).get("stream_queue") if config else None
+    if queue:
+        await queue.put({"event": "thought", "message": "SQL insights node started: executing natural language to SQL pipeline..."})
     result = await run_sql_insights(
         query=state["user_query"],
         role=state.get("user_role", "analyst")
@@ -154,11 +162,14 @@ async def sql_insights_node(state: SupplyChainState) -> dict:
 # ─────────────────────────────────────────────
 # NODE 3: FORECASTING ANALYST
 # ─────────────────────────────────────────────
-async def forecasting_node(state: SupplyChainState) -> dict:
+async def forecasting_node(state: SupplyChainState, config: Optional[RunnableConfig] = None) -> dict:
     """
     Research agent that reads MAPE metrics, identifies worst performers,
     and proposes hyperparameter changes. Iterates up to 2 times.
     """
+    queue = config.get("configurable", {}).get("stream_queue") if config else None
+    if queue:
+        await queue.put({"event": "thought", "message": "Forecasting analyst node started: scanning forecast metrics to identify MAPE violations..."})
     result = await run_forecasting_analyst(
         query=state["user_query"],
         session_id=state.get("session_id", str(uuid.uuid4())),
@@ -186,11 +197,12 @@ async def forecasting_node(state: SupplyChainState) -> dict:
 # We don't want to block the supervisor's async event loop.
 # Polling with exponential backoff is the A2A standard pattern.
 # ─────────────────────────────────────────────
-async def allocation_replenishment_node(state: SupplyChainState) -> dict:
+async def allocation_replenishment_node(state: SupplyChainState, config: Optional[RunnableConfig] = None) -> dict:
     """
     Delegate allocation and replenishment tasks to A2A services.
     Polls until both tasks complete or fail.
     """
+    queue = config.get("configurable", {}).get("stream_queue") if config else None
     # Determine what to trigger based on original intent
     intent = state.get("next_action", "allocation")
 
@@ -198,22 +210,32 @@ async def allocation_replenishment_node(state: SupplyChainState) -> dict:
     replen_task_id = None
 
     if intent in ("allocation", "replenishment"):
+        if queue:
+            await queue.put({"event": "thought", "message": f"Triggering A2A Allocation task for SKU: {state.get('parsed_intent', {}).get('product_id')}..."})
         # Trigger allocation first
         alloc_task_id = await trigger_allocation(
             product_id=state.get("parsed_intent", {}).get("product_id"),
             region=state.get("parsed_intent", {}).get("region"),
             role=state.get("user_role", "analyst")
         )
+        if queue:
+            await queue.put({"event": "thought", "message": f"Allocation task triggered successfully. Task ID: {alloc_task_id}"})
 
     if intent == "replenishment":
+        if queue:
+            await queue.put({"event": "thought", "message": f"Triggering A2A Replenishment task for SKU: {state.get('parsed_intent', {}).get('product_id')}..."})
         replen_task_id = await trigger_replenishment(
             product_id=state.get("parsed_intent", {}).get("product_id"),
             role=state.get("user_role", "analyst")
         )
+        if queue:
+            await queue.put({"event": "thought", "message": f"Replenishment task triggered successfully. Task ID: {replen_task_id}"})
 
     # Poll for results
-    alloc_result = await poll_task("allocation", alloc_task_id) if alloc_task_id else None
-    replen_result = await poll_task("replenishment", replen_task_id) if replen_task_id else None
+    if queue:
+        await queue.put({"event": "thought", "message": "Initiating background execution task polling..."})
+    alloc_result = await poll_task("allocation", alloc_task_id, config=config) if alloc_task_id else None
+    replen_result = await poll_task("replenishment", replen_task_id, config=config) if replen_task_id else None
 
     summary_parts = []
     if alloc_result:
@@ -437,13 +459,14 @@ async def _execute_forecast_tuning(state: SupplyChainState) -> str:
     return "No changes applied."
 
 
-async def hitl_node(state: SupplyChainState) -> dict:
+async def hitl_node(state: SupplyChainState, config: Optional[RunnableConfig] = None) -> dict:
     """
     Pause and wait for human approval before taking any 'action'.
 
     Day 6 addition: after approval, call the appropriate execute function
     to actually write changes to the database.
     """
+    queue = config.get("configurable", {}).get("stream_queue") if config else None
     # ── Fallback for re-running node from beginning (if human_approved is already set)
     if state.get("human_approved") is not None:
         user_role = state.get("user_role", "analyst")
@@ -460,23 +483,33 @@ async def hitl_node(state: SupplyChainState) -> dict:
             intent = state.get("parsed_intent", {}).get("query_type", "")
 
             if alloc_task_id or state.get("allocation_result"):
+                if queue:
+                    await queue.put({"event": "thought", "message": "Executing approved Inventory Transfer transfers in DB..."})
                 msg = await _execute_allocation(alloc_task_id, state.get("allocation_result"))
                 execution_messages.append(f"Allocation: {msg}")
 
             if replen_task_id or state.get("replenishment_result"):
+                if queue:
+                    await queue.put({"event": "thought", "message": "Executing approved Purchase Order in DB..."})
                 msg = await _execute_replenishment(replen_task_id, state.get("replenishment_result"))
                 execution_messages.append(f"Replenishment: {msg}")
 
             if intent == "forecast_tuning" or state.get("proposed_tuning"):
+                if queue:
+                    await queue.put({"event": "thought", "message": "Applying forecasting hyperparameter retuning changes..."})
                 msg = await _execute_forecast_tuning(state)
                 execution_messages.append(f"Forecast tuning: {msg}")
 
             summary = " | ".join(execution_messages) if execution_messages else "Action approved and executed."
+            if queue:
+                await queue.put({"event": "thought", "message": f"Execution finished successfully: {summary}"})
             return {
                 "next_action": "done",
                 "messages": [AIMessage(content=summary)]
             }
         else:
+            if queue:
+                await queue.put({"event": "thought", "message": f"Action rejected: {state.get('human_feedback', 'No reason given')}"})
             return {
                 "next_action": "done",
                 "messages": [AIMessage(content=f"Action rejected. Reason: {state.get('human_feedback', 'No reason given')}.")]
@@ -498,9 +531,15 @@ async def hitl_node(state: SupplyChainState) -> dict:
     feedback = human_response.get("feedback", "")
     user_role = human_response.get("user_role", state.get("user_role", "analyst"))
 
+    if queue:
+        action_str = "APPROVED" if approved else "REJECTED"
+        await queue.put({"event": "thought", "message": f"HITL decision received: {action_str}"})
+
     if approved:
         # Enforce role verification on immediate execution path
         if user_role != "admin":
+            if queue:
+                await queue.put({"event": "thought", "message": "Permission denied: Only administrator role can execute changes."})
             return {
                 "human_approved": False,
                 "human_feedback": "Permission denied: Only administrator role can execute changes.",
@@ -515,18 +554,26 @@ async def hitl_node(state: SupplyChainState) -> dict:
         intent = state.get("parsed_intent", {}).get("query_type", "")
 
         if alloc_task_id or state.get("allocation_result"):
+            if queue:
+                await queue.put({"event": "thought", "message": "Applying Inventory Transfer in database..."})
             msg = await _execute_allocation(alloc_task_id, state.get("allocation_result"))
             execution_messages.append(f"Allocation: {msg}")
 
         if replen_task_id or state.get("replenishment_result"):
+            if queue:
+                await queue.put({"event": "thought", "message": "Applying Purchase Order in database..."})
             msg = await _execute_replenishment(replen_task_id, state.get("replenishment_result"))
             execution_messages.append(f"Replenishment: {msg}")
 
         if intent == "forecast_tuning" or state.get("proposed_tuning"):
+            if queue:
+                await queue.put({"event": "thought", "message": "Applying forecast hyperparameter changes..."})
             msg = await _execute_forecast_tuning(state)
             execution_messages.append(f"Forecast tuning: {msg}")
 
         summary = " | ".join(execution_messages) if execution_messages else "Action approved and executed."
+        if queue:
+            await queue.put({"event": "thought", "message": f"Execution finished successfully: {summary}"})
         return {
             "human_approved": approved,
             "human_feedback": feedback,
@@ -535,6 +582,8 @@ async def hitl_node(state: SupplyChainState) -> dict:
             "messages": [AIMessage(content=summary)]
         }
     else:
+        if queue:
+            await queue.put({"event": "thought", "message": f"Action rejected: {feedback or 'No reason given'}"})
         return {
             "human_approved": approved,
             "human_feedback": feedback,

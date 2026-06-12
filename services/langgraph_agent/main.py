@@ -52,8 +52,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
+import json
 import asyncpg
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -649,6 +651,245 @@ async def resume_graph(req: ResumeRequest):
     except Exception as e:
         logger.error(f"Resume failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Graph resume failed: {str(e)}")
+
+
+async def invoke_stream_generator(req: InvokeRequest, thread_id: str):
+    queue = asyncio.Queue()
+    user_query = _build_user_query(req)
+
+    initial_state: dict[str, Any] = {
+        "user_query": user_query,
+        "user_role": req.user_role,
+        "session_id": thread_id,
+        "messages": [HumanMessage(content=user_query)],
+        "human_approved": None,
+        "tuning_iterations": 0,
+        "error": None,
+        "parsed_intent": {
+            "product_id": req.product_id,
+            "region": req.location,
+            "query_type": req.proposal_type,
+        },
+    }
+
+    run_name = f"{req.proposal_type}:{req.product_name}"
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "stream_queue": queue,
+        },
+        "run_name": run_name,
+    }
+
+    async def run_graph():
+        try:
+            await queue.put({"event": "thought", "message": f"Starting LangGraph supervisor graph execution for {req.product_name} ({req.proposal_type})..."})
+            
+            async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
+                app = build_supervisor_graph(checkpointer=checkpointer)
+                
+                nodes_visited = []
+                last_ai_message = "Agent analysis in progress."
+                proposed_tuning = None
+                replenishment_result = None
+                allocation_result = None
+                
+                async for event in app.astream(initial_state, config=config, stream_mode="updates"):
+                    for node_name, node_output in event.items():
+                        if node_name == "__interrupt__":
+                            logger.info(f"Graph paused at interrupt for thread {thread_id}")
+                            break
+                        nodes_visited.append(node_name)
+                        logger.info(f"Node completed: {node_name}")
+                        await queue.put({
+                            "event": "node_complete",
+                            "node": node_name,
+                            "nodes_visited": list(nodes_visited)
+                        })
+                        
+                        msgs = node_output.get("messages", [])
+                        for msg in reversed(msgs):
+                            if isinstance(msg, AIMessage) and msg.content:
+                                last_ai_message = msg.content
+                                await queue.put({
+                                    "event": "thought",
+                                    "message": f"[{node_name}] {msg.content[:150]}..."
+                                })
+                                break
+                                
+                        if node_output.get("proposed_tuning"):
+                            proposed_tuning = node_output["proposed_tuning"]
+                        if node_output.get("replenishment_result"):
+                            replenishment_result = node_output["replenishment_result"]
+                        if node_output.get("allocation_result"):
+                            allocation_result = node_output["allocation_result"]
+                            
+            await queue.put({"event": "thought", "message": "Saving execution state and metadata to PostgreSQL..."})
+            await update_proposal_thread_id(req.proposal_id, thread_id)
+            
+            if req.proposal_type == "forecast_tuning" and proposed_tuning:
+                try:
+                    await update_proposal_forecast_payload(req.proposal_id, proposed_tuning)
+                except Exception as e:
+                    logger.warning(f"Failed to write forecast payload (non-fatal): {e}")
+
+            if req.proposal_type == "replenishment" and replenishment_result:
+                try:
+                    await update_proposal_replenishment_payload(req.proposal_id, replenishment_result)
+                except Exception as e:
+                    logger.warning(f"Failed to write replenishment payload (non-fatal): {e}")
+
+            if req.proposal_type == "allocation" and allocation_result:
+                try:
+                    await update_proposal_allocation_payload(req.proposal_id, allocation_result)
+                except Exception as e:
+                    logger.warning(f"Failed to write allocation payload (non-fatal): {e}")
+
+            trace_id = None
+            trace_url = None
+            if _LANGSMITH_ENABLED:
+                await queue.put({"event": "thought", "message": "Retrieving LangSmith trace details..."})
+                await asyncio.sleep(3)
+                trace_id, trace_url = await asyncio.get_event_loop().run_in_executor(
+                    None, _get_langsmith_trace_url, run_name
+                )
+                if trace_id:
+                    await update_proposal_trace_id(req.proposal_id, trace_id, trace_url)
+                    
+            await queue.put({
+                "event": "complete",
+                "thread_id": thread_id,
+                "proposal_id": req.proposal_id,
+                "status": "paused_at_hitl",
+                "nodes_visited": nodes_visited,
+                "agent_summary": last_ai_message,
+                "trace_id": trace_id,
+                "trace_url": trace_url,
+            })
+        except Exception as e:
+            logger.error(f"Invoke stream graph error: {e}", exc_info=True)
+            await queue.put({"event": "error", "message": f"Graph error: {str(e)}"})
+
+    graph_task = asyncio.create_task(run_graph())
+
+    while True:
+        try:
+            item = await queue.get()
+            yield f"data: {json.dumps(item)}\n\n"
+            if item.get("event") in ("complete", "error"):
+                break
+        except asyncio.CancelledError:
+            logger.info("Invoke stream request cancelled. Cancelling background graph task...")
+            graph_task.cancel()
+            raise
+
+
+async def resume_stream_generator(req: ResumeRequest):
+    queue = asyncio.Queue()
+    config = {
+        "configurable": {
+            "thread_id": req.thread_id,
+            "stream_queue": queue,
+        }
+    }
+
+    resume_payload = {
+        "approved": req.approved,
+        "feedback": req.feedback,
+        "user_role": req.user_role,
+    }
+
+    async def run_graph():
+        try:
+            action_verb = "Approving" if req.approved else "Rejecting"
+            await queue.put({"event": "thought", "message": f"{action_verb} proposal. Resuming paused LangGraph workflow..."})
+            
+            async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
+                app = build_supervisor_graph(checkpointer=checkpointer)
+                
+                nodes_visited = []
+                final_message = "Execution complete."
+                
+                async for event in app.astream(
+                    Command(resume=resume_payload),
+                    config=config,
+                    stream_mode="updates"
+                ):
+                    for node_name, node_output in event.items():
+                        nodes_visited.append(node_name)
+                        logger.info(f"Resume — node completed: {node_name}")
+                        await queue.put({
+                            "event": "node_complete",
+                            "node": node_name,
+                            "nodes_visited": list(nodes_visited)
+                        })
+                        
+                        msgs = node_output.get("messages", [])
+                        for msg in reversed(msgs):
+                            if isinstance(msg, AIMessage) and msg.content:
+                                final_message = msg.content
+                                await queue.put({
+                                    "event": "thought",
+                                    "message": f"[{node_name}] {msg.content[:150]}..."
+                                })
+                                break
+                                
+            await queue.put({"event": "thought", "message": "Updating proposal execution state in PostgreSQL..."})
+            new_status = "approved" if req.approved else "rejected"
+            await update_proposal_status(req.proposal_id, new_status)
+            
+            await queue.put({
+                "event": "complete",
+                "proposal_id": req.proposal_id,
+                "thread_id": req.thread_id,
+                "approved": req.approved,
+                "status": "executed" if req.approved else "rejected",
+                "final_message": final_message,
+                "nodes_visited": nodes_visited,
+            })
+        except Exception as e:
+            logger.error(f"Resume stream graph error: {e}", exc_info=True)
+            await queue.put({"event": "error", "message": f"Resume error: {str(e)}"})
+
+    graph_task = asyncio.create_task(run_graph())
+
+    while True:
+        try:
+            item = await queue.get()
+            yield f"data: {json.dumps(item)}\n\n"
+            if item.get("event") in ("complete", "error"):
+                break
+        except asyncio.CancelledError:
+            logger.info("Resume stream request cancelled. Cancelling background graph task...")
+            graph_task.cancel()
+            raise
+
+
+@app.post("/invoke/stream")
+async def invoke_graph_stream(req: InvokeRequest):
+    """
+    Start supervisor graph and stream intermediate execution steps as SSE.
+    """
+    logger.info(f"Invoke stream: proposal={req.proposal_id} type={req.proposal_type}")
+    thread_id = str(uuid.uuid4())
+    return StreamingResponse(
+        invoke_stream_generator(req, thread_id),
+        media_type="text/event-stream"
+    )
+
+
+@app.post("/resume/stream")
+async def resume_graph_stream(req: ResumeRequest):
+    """
+    Resume paused graph and stream remaining execution steps as SSE.
+    """
+    logger.info(f"Resume stream: proposal={req.proposal_id} thread={req.thread_id}")
+    if req.user_role != "admin":
+        raise HTTPException(status_code=403, detail="Permission denied: Only administrator role can resume graphs.")
+    return StreamingResponse(
+        resume_stream_generator(req),
+        media_type="text/event-stream"
+    )
 
 
 @app.get("/threads/{thread_id}/state")

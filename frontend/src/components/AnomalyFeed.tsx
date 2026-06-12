@@ -21,15 +21,25 @@ import {
   Zap, TrendingDown, BarChart2, CheckCircle,
   RefreshCw, ChevronDown, ChevronUp, Scan
 } from "lucide-react";
+
+const ZapIcon = Zap as any;
+const TrendingDownIcon = TrendingDown as any;
+const BarChart2Icon = BarChart2 as any;
+const CheckCircleIcon = CheckCircle as any;
+const RefreshCwIcon = RefreshCw as any;
+const ChevronDownIcon = ChevronDown as any;
+const ChevronUpIcon = ChevronUp as any;
+const ScanIcon = Scan as any;
+
 import { api } from "@/lib/api";
 import type { AnomalyEvent, AnomalyType } from "@/types";
 
 // ── Icons per anomaly type ────────────────────────────────────────────────────
 function AnomalyIcon({ type, className }: { type: AnomalyType; className?: string }) {
   switch (type) {
-    case "stock_drop":     return <TrendingDown className={className} />;
-    case "demand_spike":   return <Zap           className={className} />;
-    case "mape_regression":return <BarChart2     className={className} />;
+    case "stock_drop":     return <TrendingDownIcon className={className} />;
+    case "demand_spike":   return <ZapIcon           className={className} />;
+    case "mape_regression":return <BarChart2Icon     className={className} />;
   }
 }
 
@@ -151,8 +161,8 @@ function AnomalyCard({
             title="Acknowledge"
           >
             {acking
-              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              : <CheckCircle className="w-3.5 h-3.5" />
+              ? <RefreshCwIcon className="w-3.5 h-3.5 animate-spin" />
+              : <CheckCircleIcon className="w-3.5 h-3.5" />
             }
           </button>
         )}
@@ -232,7 +242,7 @@ export function AnomalyFeed() {
         onClick={() => setCollapsed((c) => !c)}
       >
         <div className="flex items-center gap-2">
-          <Zap className="w-4 h-4 text-amber-400" />
+          <ZapIcon className="w-4 h-4 text-amber-400" />
           <h2 className="text-sm font-semibold text-white">Anomaly Detection</h2>
           <span className="text-[10px] text-slate-500">— Live Scanner · Last 24h</span>
         </div>
@@ -265,8 +275,8 @@ export function AnomalyFeed() {
             title="Trigger immediate anomaly scan"
           >
             {scanning
-              ? <RefreshCw className="w-3 h-3 animate-spin" />
-              : <Scan className="w-3 h-3" />
+              ? <RefreshCwIcon className="w-3 h-3 animate-spin" />
+              : <ScanIcon className="w-3 h-3" />
             }
             Scan now
           </button>
@@ -276,12 +286,12 @@ export function AnomalyFeed() {
             onClick={(e) => { e.stopPropagation(); handleRefresh(); }}
             className="p-1.5 rounded-lg hover:bg-slate-800 border border-slate-800 transition-colors"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${refreshing ? "animate-spin" : ""}`} />
+            <RefreshCwIcon className={`w-3.5 h-3.5 text-slate-400 ${refreshing ? "animate-spin" : ""}`} />
           </button>
 
           {collapsed
-            ? <ChevronDown className="w-4 h-4 text-slate-500" />
-            : <ChevronUp   className="w-4 h-4 text-slate-500" />
+            ? <ChevronDownIcon className="w-4 h-4 text-slate-500" />
+            : <ChevronUpIcon   className="w-4 h-4 text-slate-500" />
           }
         </div>
       </div>
@@ -327,11 +337,11 @@ export function AnomalyFeed() {
           {/* Event list */}
           {loading ? (
             <div className="flex items-center gap-2 px-4 py-6 text-slate-500 text-sm">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading anomaly feed…
+              <RefreshCwIcon className="w-3.5 h-3.5 animate-spin" /> Loading anomaly feed…
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex items-center gap-2 px-4 py-6 text-slate-500 text-sm">
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <CheckCircleIcon className="w-4 h-4 text-emerald-400" />
               {unackedOnly
                 ? "No unacknowledged anomalies. Run a scan to check for new ones."
                 : "No anomalies detected in the last 24 hours. Run a scan to check now."}

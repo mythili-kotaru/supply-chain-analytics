@@ -4,6 +4,12 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { Lock, User, ShieldAlert, Zap, Loader2 } from "lucide-react";
 
+const LockIcon = Lock as any;
+const UserIcon = User as any;
+const ShieldAlertIcon = ShieldAlert as any;
+const ZapIcon = Zap as any;
+const Loader2Icon = Loader2 as any;
+
 interface LoginPanelProps {
   onLoginSuccess: (token: string) => void;
 }
@@ -69,7 +75,7 @@ export function LoginPanel({ onLoginSuccess }: LoginPanelProps) {
         {/* Brand/Logo header */}
         <div className="flex flex-col items-center text-center">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-500/20 mb-3 animate-pulse">
-            <Zap className="w-6 h-6 text-white" />
+            <ZapIcon className="w-6 h-6 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-1.5">
             <span>CVS Health</span>
@@ -88,7 +94,7 @@ export function LoginPanel({ onLoginSuccess }: LoginPanelProps) {
 
           {error && (
             <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-400 mb-5 animate-shake">
-              <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+              <ShieldAlertIcon className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
@@ -99,7 +105,7 @@ export function LoginPanel({ onLoginSuccess }: LoginPanelProps) {
                 Username
               </label>
               <div className="relative">
-                <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <UserIcon className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="Enter username"
@@ -116,7 +122,7 @@ export function LoginPanel({ onLoginSuccess }: LoginPanelProps) {
                 Password
               </label>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <LockIcon className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="password"
                   placeholder="••••••••"
@@ -135,7 +141,7 @@ export function LoginPanel({ onLoginSuccess }: LoginPanelProps) {
             >
               {loading ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2Icon className="w-4 h-4 animate-spin" />
                   <span>Authenticating...</span>
                 </>
               ) : (

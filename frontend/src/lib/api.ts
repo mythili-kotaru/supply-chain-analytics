@@ -127,4 +127,124 @@ export const api = {
 
   getInventoryByCategoryChart: () =>
     apiFetch<{ category: string; avg_capacity_pct: number; sku_count: number; at_risk: number }[]>("/charts/inventory-by-category"),
+
+  streamProposalApprove: async (
+    id: string,
+    onEvent: (event: any) => void
+  ): Promise<any> => {
+    const role = getRole();
+    const token = getToken();
+    const headers = new Headers();
+    headers.set("Content-Type", "application/json");
+    headers.set("x-role", role);
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    const response = await fetch(`${BASE}/proposals/${id}/approve/stream`, {
+      method: "POST",
+      headers,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Stream error ${response.status}: ${body}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No readable stream in response");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult = null;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data: ")) {
+            const dataStr = trimmed.slice(6);
+            try {
+              const event = JSON.parse(dataStr);
+              onEvent(event);
+              if (event.event === "complete") {
+                finalResult = event;
+              }
+            } catch (e) {
+              console.error("Failed to parse stream event", dataStr, e);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    return finalResult;
+  },
+
+  streamProposalReject: async (
+    id: string,
+    onEvent: (event: any) => void
+  ): Promise<any> => {
+    const role = getRole();
+    const token = getToken();
+    const headers = new Headers();
+    headers.set("Content-Type", "application/json");
+    headers.set("x-role", role);
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    const response = await fetch(`${BASE}/proposals/${id}/reject/stream`, {
+      method: "POST",
+      headers,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Stream error ${response.status}: ${body}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No readable stream in response");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult = null;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data: ")) {
+            const dataStr = trimmed.slice(6);
+            try {
+              const event = JSON.parse(dataStr);
+              onEvent(event);
+              if (event.event === "complete") {
+                finalResult = event;
+              }
+            } catch (e) {
+              console.error("Failed to parse stream event", dataStr, e);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    return finalResult;
+  },
 };

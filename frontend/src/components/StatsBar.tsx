@@ -1,6 +1,14 @@
 "use client";
 
 import { AlertTriangle, Clock, CheckCircle2, DollarSign, TrendingUp, Server } from "lucide-react";
+
+const AlertTriangleIcon = AlertTriangle as any;
+const ClockIcon = Clock as any;
+const CheckCircle2Icon = CheckCircle2 as any;
+const DollarSignIcon = DollarSign as any;
+const TrendingUpIcon = TrendingUp as any;
+const ServerIcon = Server as any;
+
 import type { DashboardStats } from "@/types";
 
 interface StatsBarProps {
@@ -30,7 +38,7 @@ export function StatsBar({ stats }: StatsBarProps) {
       <div className="stat-card border-l-2 border-l-red-500/60 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-red-500/5 to-transparent pointer-events-none" />
         <div className="flex items-center gap-1.5 text-red-400 text-xs font-medium">
-          <AlertTriangle className="w-3.5 h-3.5" />
+          <AlertTriangleIcon className="w-3.5 h-3.5" />
           Critical Alerts
         </div>
         <p className={`text-2xl font-bold ${stats.critical_alerts > 0 ? "text-red-400" : "text-slate-400"}`}>
@@ -45,7 +53,7 @@ export function StatsBar({ stats }: StatsBarProps) {
       <div className="stat-card border-l-2 border-l-amber-500/60 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent pointer-events-none" />
         <div className="flex items-center gap-1.5 text-amber-400 text-xs font-medium">
-          <Clock className="w-3.5 h-3.5" />
+          <ClockIcon className="w-3.5 h-3.5" />
           Pending Approval
         </div>
         <div className="flex items-end gap-2">
@@ -61,7 +69,7 @@ export function StatsBar({ stats }: StatsBarProps) {
       <div className="stat-card border-l-2 border-l-emerald-500/60 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent pointer-events-none" />
         <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-medium">
-          <CheckCircle2 className="w-3.5 h-3.5" />
+          <CheckCircle2Icon className="w-3.5 h-3.5" />
           Approved Today
         </div>
         <p className="text-2xl font-bold text-emerald-400">{stats.approved_today}</p>
@@ -72,7 +80,7 @@ export function StatsBar({ stats }: StatsBarProps) {
       <div className="stat-card border-l-2 border-l-blue-500/60 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent pointer-events-none" />
         <div className="flex items-center gap-1.5 text-blue-400 text-xs font-medium">
-          <DollarSign className="w-3.5 h-3.5" />
+          <DollarSignIcon className="w-3.5 h-3.5" />
           PO Value Pending
         </div>
         <p className="text-2xl font-bold text-blue-400 tabular-nums">
@@ -85,7 +93,7 @@ export function StatsBar({ stats }: StatsBarProps) {
       <div className="stat-card border-l-2 border-l-violet-500/60 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-transparent pointer-events-none" />
         <div className="flex items-center gap-1.5 text-violet-400 text-xs font-medium">
-          <TrendingUp className="w-3.5 h-3.5" />
+          <TrendingUpIcon className="w-3.5 h-3.5" />
           Avg MAPE
         </div>
         <div className="flex items-end gap-2">
@@ -115,7 +123,7 @@ export function StatsBar({ stats }: StatsBarProps) {
       {/* Services */}
       <div className="stat-card border-l-2 border-l-slate-600 relative overflow-hidden">
         <div className="flex items-center gap-1.5 text-slate-400 text-xs font-medium">
-          <Server className="w-3.5 h-3.5" />
+          <ServerIcon className="w-3.5 h-3.5" />
           Services
           {allHealthy && (
             <span className="ml-auto text-[10px] text-emerald-500 font-normal">all healthy</span>

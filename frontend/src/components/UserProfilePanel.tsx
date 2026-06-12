@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+const LinkComponent = Link as any;
+
 import { api } from "@/lib/api";
 import type { DashboardStats } from "@/types";
 import {
@@ -15,6 +17,15 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+const CheckCircle2Icon = CheckCircle2 as any;
+const AlertTriangleIcon = AlertTriangle as any;
+const XCircleIcon = XCircle as any;
+const ZapIcon = Zap as any;
+const LayoutDashboardIcon = LayoutDashboard as any;
+const LogOutIcon = LogOut as any;
+const RefreshCwIcon = RefreshCw as any;
+const ChevronRightIcon = ChevronRight as any;
+
 interface UserProfilePanelProps {
   stats: DashboardStats;
   role: "analyst" | "admin";
@@ -24,10 +35,10 @@ interface UserProfilePanelProps {
 
 function ServiceStatusDot({ status }: { status: string }) {
   if (status === "healthy")
-    return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />;
+    return <CheckCircle2Icon className="w-3.5 h-3.5 text-emerald-400 shrink-0" />;
   if (status === "degraded")
-    return <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />;
-  return <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
+    return <AlertTriangleIcon className="w-3.5 h-3.5 text-amber-400 shrink-0" />;
+  return <XCircleIcon className="w-3.5 h-3.5 text-red-400 shrink-0" />;
 }
 
 export function UserProfilePanel({ stats, role, setRole, onClose }: UserProfilePanelProps) {
@@ -156,23 +167,23 @@ export function UserProfilePanel({ stats, role, setRole, onClose }: UserProfileP
         <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-2 py-1.5">
           Quick Actions
         </p>
-        <Link
+        <LinkComponent
           href="/"
           onClick={onClose}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
         >
-          <LayoutDashboard className="w-4 h-4 text-slate-400" />
+          <LayoutDashboardIcon className="w-4 h-4 text-slate-400" />
           View All Proposals
-          <ChevronRight className="w-3.5 h-3.5 ml-auto text-slate-600" />
-        </Link>
+          <ChevronRightIcon className="w-3.5 h-3.5 ml-auto text-slate-600" />
+        </LinkComponent>
         <button
           onClick={handleMonitorRun}
           disabled={scanning}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <RefreshCw className={`w-4 h-4 text-slate-400 ${scanning ? "animate-spin" : ""}`} />
+          <RefreshCwIcon className={`w-4 h-4 text-slate-400 ${scanning ? "animate-spin" : ""}`} />
           {scanning ? "Running Monitors…" : "Trigger Monitor Scan"}
-          {!scanning && <Zap className="w-3 h-3 ml-auto text-slate-600" />}
+          {!scanning && <ZapIcon className="w-3 h-3 ml-auto text-slate-600" />}
         </button>
         {scanResult && (
           <p className={`text-[11px] px-3 py-1.5 rounded-lg mx-0 mt-1 ${scanResult.startsWith("✓") ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"}`}>
@@ -218,7 +229,7 @@ export function UserProfilePanel({ stats, role, setRole, onClose }: UserProfileP
           onClick={handleSignOut}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
         >
-          <LogOut className="w-4 h-4" />
+          <LogOutIcon className="w-4 h-4" />
           Sign Out
         </button>
       </div>

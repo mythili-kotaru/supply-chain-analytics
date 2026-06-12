@@ -1,12 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   CheckCircle2, XCircle, ChevronDown, ChevronUp,
   ShoppingCart, ArrowLeftRight, BarChart2,
   Clock, Cpu, GitBranch, Loader2, Zap, ExternalLink,
 } from "lucide-react";
+
+const CheckCircle2Icon = CheckCircle2 as any;
+const XCircleIcon = XCircle as any;
+const ChevronDownIcon = ChevronDown as any;
+const ChevronUpIcon = ChevronUp as any;
+const ShoppingCartIcon = ShoppingCart as any;
+const ArrowLeftRightIcon = ArrowLeftRight as any;
+const BarChart2Icon = BarChart2 as any;
+const ClockIcon = Clock as any;
+const CpuIcon = Cpu as any;
+const GitBranchIcon = GitBranch as any;
+const Loader2Icon = Loader2 as any;
+const ZapIcon = Zap as any;
+const ExternalLinkIcon = ExternalLink as any;
+
 import type { Proposal } from "@/types";
+import { api } from "@/lib/api";
 
 interface ProposalCardProps {
   proposal: Proposal;
@@ -24,27 +40,33 @@ interface AgentResult {
 
 const TYPE_META = {
   replenishment: {
-    icon: ShoppingCart,
+    icon: ShoppingCartIcon,
     label: "Purchase Order",
     color: "text-blue-400",
     bg: "bg-blue-500/10",
     border: "border-blue-500/20",
   },
   allocation: {
-    icon: ArrowLeftRight,
+    icon: ArrowLeftRightIcon,
     label: "Inventory Transfer",
     color: "text-violet-400",
     bg: "bg-violet-500/10",
     border: "border-violet-500/20",
   },
   forecast_tuning: {
-    icon: BarChart2,
+    icon: BarChart2Icon,
     label: "Model Retuning",
     color: "text-amber-400",
     bg: "bg-amber-500/10",
     border: "border-amber-500/20",
   },
 };
+
+interface TerminalLog {
+  timestamp: string;
+  type: "info" | "success" | "poll" | "error";
+  message: string;
+}
 
 export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -56,11 +78,23 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
   >("idle");
   const [agentResult, setAgentResult] = useState<AgentResult | null>(null);
 
+  // Terminal log state
+  const [logs, setLogs] = useState<TerminalLog[]>([]);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const terminalEndRef = useRef<HTMLDivElement>(null);
+
   const meta = TYPE_META[proposal.type];
   const Icon = meta.icon;
   const isPending = proposal.status === "pending" && actionState === "idle";
-  const isApproved = proposal.status === "approved" || actionState === "done" && agentResult !== null && agentResult.graph_status !== "rejected";
+  const isApproved = proposal.status === "approved" || (actionState === "done" && agentResult !== null && agentResult.graph_status !== "rejected");
   const isLoading = actionState === "approving" || actionState === "rejecting";
+
+  // Auto-scroll terminal
+  useEffect(() => {
+    if (terminalEndRef.current) {
+      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs]);
 
   const timeAgo = (iso: string) => {
     const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -69,15 +103,42 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
     return `${Math.floor(diff / 60)}h ago`;
   };
 
+  const addLog = (message: string, type: "info" | "success" | "poll" | "error" = "info") => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLogs((prev) => [...prev, { timestamp, type, message }]);
+  };
+
   // ── Day 4: wrap onApprove/onReject to show loading + result ──────────────
-  // The parent's onApprove calls the API and returns the response.
-  // We show a spinner while it's in-flight, then surface the agent result.
   const handleApprove = async () => {
     setActionState("approving");
+    setShowTerminal(true);
+    setLogs([]);
+    addLog("Initializing secure approval connection...", "info");
+
     try {
-      // onApprove is async — the parent passes the API response back via a
-      // custom event on the proposal element. We call it and await it.
-      await (onApprove as unknown as (id: string) => Promise<AgentResult | void>)(proposal.id);
+      await api.streamProposalApprove(proposal.id, (event) => {
+        if (event.event === "thought") {
+          const type = event.message.includes("Polling") ? "poll" : "info";
+          addLog(event.message, type);
+        } else if (event.event === "node_complete") {
+          addLog(`Completed LangGraph node: ${event.node}`, "success");
+        } else if (event.event === "complete") {
+          addLog("LangGraph workflow completed successfully.", "success");
+          setAgentResult({
+            via_langgraph: event.thread_id !== null,
+            nodes_visited: event.nodes_visited,
+            final_message: event.final_message,
+            graph_status: event.status === "paused_at_hitl" ? "executed" : event.status,
+          });
+        } else if (event.event === "error") {
+          addLog(`Error: ${event.message}`, "error");
+        }
+      });
+      // Let the parent refresh the proposal list
+      onApprove(proposal.id);
+    } catch (err) {
+      console.error("Approve stream failed:", err);
+      addLog(`Approve failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     } finally {
       setActionState("done");
     }
@@ -85,8 +146,33 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
 
   const handleReject = async () => {
     setActionState("rejecting");
+    setShowTerminal(true);
+    setLogs([]);
+    addLog("Initializing secure rejection connection...", "info");
+
     try {
-      await (onReject as unknown as (id: string) => Promise<AgentResult | void>)(proposal.id);
+      await api.streamProposalReject(proposal.id, (event) => {
+        if (event.event === "thought") {
+          addLog(event.message, "info");
+        } else if (event.event === "node_complete") {
+          addLog(`Completed LangGraph node: ${event.node}`, "success");
+        } else if (event.event === "complete") {
+          addLog("LangGraph workflow completed successfully.", "success");
+          setAgentResult({
+            via_langgraph: event.thread_id !== null,
+            nodes_visited: event.nodes_visited,
+            final_message: event.final_message,
+            graph_status: "rejected",
+          });
+        } else if (event.event === "error") {
+          addLog(`Error: ${event.message}`, "error");
+        }
+      });
+      // Let the parent refresh the proposal list
+      onReject(proposal.id);
+    } catch (err) {
+      console.error("Reject stream failed:", err);
+      addLog(`Reject failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     } finally {
       setActionState("done");
     }
@@ -141,7 +227,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                 {/* Day 4: show loading badge while LangGraph runs */}
                 {isLoading && (
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full border bg-indigo-500/10 text-indigo-400 border-indigo-500/30 flex items-center gap-1">
-                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <Loader2Icon className="w-3 h-3 animate-spin" />
                     {actionState === "approving" ? "Resuming agent…" : "Rejecting…"}
                   </span>
                 )}
@@ -188,19 +274,19 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
           {/* Time + meta */}
           <div className="text-right shrink-0">
             <p className="text-xs text-slate-500 flex items-center gap-1 justify-end">
-              <Clock className="w-3 h-3" />
+              <ClockIcon className="w-3 h-3" />
               {timeAgo(proposal.created_at)}
             </p>
             {proposal.latency_ms && (
               <p className="text-xs text-slate-600 flex items-center gap-1 justify-end mt-0.5">
-                <Cpu className="w-3 h-3" />
+                <CpuIcon className="w-3 h-3" />
                 {proposal.latency_ms}ms
               </p>
             )}
             {/* Day 4: show thread_id chip if available */}
             {proposal.thread_id && (
               <p className="text-xs text-indigo-600 flex items-center gap-1 justify-end mt-0.5 font-mono">
-                <Zap className="w-3 h-3" />
+                <ZapIcon className="w-3 h-3" />
                 {proposal.thread_id.slice(0, 8)}…
               </p>
             )}
@@ -213,7 +299,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                 className="text-xs text-violet-500 hover:text-violet-400 flex items-center gap-1 justify-end mt-0.5 transition-colors"
                 title={`LangSmith run: ${proposal.trace_id}`}
               >
-                <ExternalLink className="w-3 h-3" />
+                <ExternalLinkIcon className="w-3 h-3" />
                 View Trace
               </a>
             )}
@@ -228,6 +314,52 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
           </p>
         </div>
 
+        {/* Real-time Agent Terminal */}
+        {showTerminal && logs.length > 0 && (
+          <div className="mt-3 bg-slate-950/90 border border-slate-800 rounded-lg p-3 font-mono text-[10px] text-slate-300 shadow-inner flex flex-col h-40">
+            {/* Terminal Header */}
+            <div className="flex items-center justify-between border-b border-slate-900 pb-1.5 mb-2 text-slate-500 shrink-0 select-none">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500/80" />
+                <span className="w-2 h-2 rounded-full bg-yellow-500/80" />
+                <span className="w-2 h-2 rounded-full bg-green-500/80 animate-pulse" />
+                <span className="ml-1 text-[9px] uppercase tracking-wider font-semibold text-slate-400">Agent Terminal</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`w-1.5 h-1.5 rounded-full ${isLoading ? "bg-emerald-500 animate-ping" : "bg-slate-600"}`} />
+                <span className="text-[9px] text-slate-400">{isLoading ? "active session" : "session complete"}</span>
+                {!isLoading && (
+                  <button 
+                    onClick={() => setShowTerminal(false)}
+                    className="ml-2 text-[9px] text-indigo-400 hover:text-indigo-300 hover:underline cursor-pointer"
+                  >
+                    Hide
+                  </button>
+                )}
+              </div>
+            </div>
+            {/* Terminal Body */}
+            <div className="flex-1 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent scroll-smooth">
+              {logs.map((log, i) => (
+                <div key={i} className="flex items-start gap-1.5 leading-normal">
+                  <span className="text-slate-600 shrink-0 select-none">[{log.timestamp}]</span>
+                  <span className={
+                    log.type === "success" ? "text-emerald-400 font-medium" :
+                    log.type === "error" ? "text-red-400 font-semibold" :
+                    log.type === "poll" ? "text-violet-400" :
+                    "text-slate-300"
+                  }>
+                    {log.type === "success" && "✔ "}
+                    {log.type === "error" && "✖ "}
+                    {log.message}
+                  </span>
+                </div>
+              ))}
+              <div ref={terminalEndRef} />
+            </div>
+          </div>
+        )}
+
         {/* Day 4: Agent execution result — shown after LangGraph resume completes */}
         {agentResult && (
           <div className={`mt-2 p-3 rounded-lg border text-xs ${
@@ -236,7 +368,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
               : "bg-slate-800/40 border-slate-700/50"
           }`}>
             <div className="flex items-center gap-1.5 mb-1.5">
-              <Zap className="w-3 h-3 text-indigo-400" />
+              <ZapIcon className="w-3 h-3 text-indigo-400" />
               <span className="font-semibold text-indigo-400">LangGraph Result</span>
               {agentResult.via_langgraph ? (
                 <span className="text-slate-500">(graph executed)</span>
@@ -247,7 +379,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
             <p className="text-slate-300 leading-relaxed">{agentResult.final_message}</p>
             {agentResult.nodes_visited.length > 0 && (
               <div className="flex items-center gap-1.5 mt-2 text-slate-500">
-                <GitBranch className="w-3 h-3" />
+                <GitBranchIcon className="w-3 h-3" />
                 {agentResult.nodes_visited.map((n, i) => (
                   <span key={n}>
                     <span className="font-mono text-slate-400">{n}</span>
@@ -305,7 +437,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                   <div key={i} className="px-3 py-2.5 text-xs">
                     <div className="flex items-center gap-2 text-slate-300">
                       <span className="font-medium">{t.from_location}</span>
-                      <ArrowLeftRight className="w-3 h-3 text-violet-400" />
+                      <ArrowLeftRightIcon className="w-3 h-3 text-violet-400" />
                       <span className="font-medium">{t.to_location}</span>
                       <span className="ml-auto font-bold text-white">{t.transfer_quantity} units</span>
                     </div>
@@ -350,7 +482,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
             {/* Trace info */}
             {proposal.nodes_visited && (
               <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
-                <GitBranch className="w-3 h-3" />
+                <GitBranchIcon className="w-3 h-3" />
                 <span>Nodes: </span>
                 {proposal.nodes_visited.map((n, i) => (
                   <span key={n}>
@@ -371,7 +503,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                 className="flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-300 transition-colors w-fit"
                 title={`LangSmith run ID: ${proposal.trace_id}`}
               >
-                <ExternalLink className="w-3 h-3" />
+                <ExternalLinkIcon className="w-3 h-3" />
                 <span>View full trace in LangSmith</span>
                 <span className="font-mono text-violet-600">{proposal.trace_id.slice(0, 8)}…</span>
               </a>
@@ -386,7 +518,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
             onClick={() => setExpanded(!expanded)}
             className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
           >
-            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            {expanded ? <ChevronUpIcon className="w-3.5 h-3.5" /> : <ChevronDownIcon className="w-3.5 h-3.5" />}
             {expanded ? "Hide details" : "View details"}
           </button>
 
@@ -398,7 +530,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                 className="btn-reject"
                 disabled={isLoading}
               >
-                <XCircle className="w-3.5 h-3.5" />
+                <XCircleIcon className="w-3.5 h-3.5" />
                 Reject
               </button>
               <button
@@ -406,7 +538,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                 className="btn-approve"
                 disabled={isLoading}
               >
-                <CheckCircle2 className="w-3.5 h-3.5" />
+                <CheckCircle2Icon className="w-3.5 h-3.5" />
                 Approve
               </button>
             </div>
@@ -415,7 +547,7 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
           {/* Loading state */}
           {isLoading && (
             <div className="flex items-center gap-2 text-xs text-indigo-400">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Loader2Icon className="w-3.5 h-3.5 animate-spin" />
               <span>
                 {actionState === "approving"
                   ? "Resuming LangGraph — executing action…"
@@ -429,8 +561,8 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
               proposal.status === "approved" ? "text-emerald-400" : "text-red-400"
             }`}>
               {proposal.status === "approved"
-                ? <><CheckCircle2 className="w-3.5 h-3.5" /> Approved &amp; executed</>
-                : <><XCircle className="w-3.5 h-3.5" /> Rejected</>
+                ? <><CheckCircle2Icon className="w-3.5 h-3.5" /> Approved &amp; executed</>
+                : <><XCircleIcon className="w-3.5 h-3.5" /> Rejected</>
               }
             </span>
           )}

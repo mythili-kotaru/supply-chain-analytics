@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>{children as any}</ToastProvider>
       </body>
     </html>
   );

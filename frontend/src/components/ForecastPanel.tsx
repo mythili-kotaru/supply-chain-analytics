@@ -1,6 +1,11 @@
 "use client";
 
 import { TrendingUp, AlertTriangle, Zap } from "lucide-react";
+
+const TrendingUpIcon = TrendingUp as any;
+const AlertTriangleIcon = AlertTriangle as any;
+const ZapIcon = Zap as any;
+
 import type { ForecastAlert } from "@/types";
 
 interface ForecastPanelProps {
@@ -43,6 +48,7 @@ function MapeBar({ value }: { value: number }) {
 }
 
 import Link from "next/link";
+const LinkComponent = Link as any;
 
 export function ForecastPanel({ alerts }: ForecastPanelProps) {
   const criticalCount = alerts.filter((a) => a.mape_pct > 25).length;
@@ -52,26 +58,26 @@ export function ForecastPanel({ alerts }: ForecastPanelProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <div className="flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-violet-400" />
+          <TrendingUpIcon className="w-4 h-4 text-violet-400" />
           <h2 className="text-sm font-semibold text-white">Forecast Health</h2>
         </div>
         <div className="flex items-center gap-3">
           <span className={criticalCount > 0 ? "badge-critical" : "badge-high"}>
             {alerts.length} above threshold
           </span>
-          <Link 
+          <LinkComponent 
             href="/forecasting"
             className="text-xs text-violet-400 hover:text-violet-300 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
           >
             View Models &rarr;
-          </Link>
+          </LinkComponent>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60">
         {alerts.length === 0 ? (
           <div className="flex items-center justify-center h-full gap-2 text-slate-500 text-sm">
-            <Zap className="w-4 h-4 text-emerald-400" />
+            <ZapIcon className="w-4 h-4 text-emerald-400" />
             All models within threshold
           </div>
         ) : (
@@ -88,7 +94,7 @@ export function ForecastPanel({ alerts }: ForecastPanelProps) {
                   </div>
                   <div className="text-right shrink-0">
                     <div className="flex items-center gap-1 justify-end">
-                      <AlertTriangle className={`w-3 h-3 ${meta.text}`} />
+                      <AlertTriangleIcon className={`w-3 h-3 ${meta.text}`} />
                       <span className={`text-base font-bold tabular-nums ${meta.text}`}>
                         {alert.mape_pct}%
                       </span>
