@@ -60,6 +60,13 @@ const TYPE_META = {
     bg: "bg-amber-500/10",
     border: "border-amber-500/20",
   },
+  supplier_config: {
+    icon: CpuIcon,
+    label: "Supplier Config",
+    color: "text-rose-400",
+    bg: "bg-rose-500/10",
+    border: "border-rose-500/20",
+  },
 };
 
 interface TerminalLog {
@@ -475,6 +482,56 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                       Expected: {proposal.forecast_tuning.expected_mape_improvement}
                     </p>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Supplier config detail */}
+            {proposal.supplier_config && (
+              <div className="rounded-lg border border-slate-700 overflow-hidden">
+                <div className="px-3 py-2 bg-slate-800/60 border-b border-slate-700">
+                  <p className="text-xs font-semibold text-slate-300">Supplier Settings Update</p>
+                </div>
+                <div className="px-3 py-2.5">
+                  <div className="grid grid-cols-3 gap-2 text-xs mb-2">
+                    <span className="text-slate-500">Property</span>
+                    <span className="text-slate-500">Current</span>
+                    <span className="text-slate-500">Proposed</span>
+                  </div>
+                  {/* Lead Time Days */}
+                  <div className={`grid grid-cols-3 gap-2 text-xs py-1 ${proposal.supplier_config.lead_time_days !== proposal.supplier_config.old_lead_time_days ? "text-amber-400" : "text-slate-400"}`}>
+                    <span>Lead Time</span>
+                    <span className={proposal.supplier_config.lead_time_days !== proposal.supplier_config.old_lead_time_days ? "line-through text-slate-600" : ""}>
+                      {proposal.supplier_config.old_lead_time_days} days
+                    </span>
+                    <span className={proposal.supplier_config.lead_time_days !== proposal.supplier_config.old_lead_time_days ? "font-semibold" : ""}>
+                      {proposal.supplier_config.lead_time_days} days
+                    </span>
+                  </div>
+                  {/* Defect Rate */}
+                  <div className={`grid grid-cols-3 gap-2 text-xs py-1 ${proposal.supplier_config.defect_rate !== proposal.supplier_config.old_defect_rate ? "text-amber-400" : "text-slate-400"}`}>
+                    <span>Defect Rate</span>
+                    <span className={proposal.supplier_config.defect_rate !== proposal.supplier_config.old_defect_rate ? "line-through text-slate-600" : ""}>
+                      {((proposal.supplier_config.old_defect_rate || 0) * 100).toFixed(2)}%
+                    </span>
+                    <span className={proposal.supplier_config.defect_rate !== proposal.supplier_config.old_defect_rate ? "font-semibold" : ""}>
+                      {(proposal.supplier_config.defect_rate * 100).toFixed(2)}%
+                    </span>
+                  </div>
+                  {/* PR Details if already approved/created */}
+                  {proposal.supplier_config.pr_url && (
+                    <div className="mt-2 pt-2 border-t border-slate-700">
+                      <a
+                        href={proposal.supplier_config.pr_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1"
+                      >
+                        <ExternalLinkIcon className="w-3 h-3" />
+                        View Pull Request (Branch: {proposal.supplier_config.branch_name})
+                      </a>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

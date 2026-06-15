@@ -4,7 +4,7 @@
 
 export type AlertSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 export type ProposalStatus = "pending" | "approved" | "rejected" | "executing" | "done";
-export type ProposalType = "replenishment" | "allocation" | "forecast_tuning";
+export type ProposalType = "replenishment" | "allocation" | "forecast_tuning" | "supplier_config";
 
 // ─── Inventory alert (from inventory table) ───────────────────────────
 export interface InventoryAlert {
@@ -83,6 +83,16 @@ export interface Proposal {
   // Present when the langgraph_agent service is running.
   // Used by the approve/reject flow to resume the checkpointed graph.
   thread_id?: string;
+  supplier_config?: {
+    supplier_id: string;
+    supplier_name: string;
+    lead_time_days: number;
+    defect_rate: number;
+    old_lead_time_days?: number;
+    old_defect_rate?: number;
+    branch_name?: string;
+    pr_url?: string;
+  };
 }
 
 export interface PurchaseOrder {
@@ -184,4 +194,12 @@ export interface DashboardStats {
     name: string;
     status: "healthy" | "degraded" | "down";
   }[];
+}
+
+export interface SupplierModel {
+  supplier_id: string;
+  supplier_name: string;
+  location: string;
+  lead_time_days: number;
+  defect_rate: number;
 }

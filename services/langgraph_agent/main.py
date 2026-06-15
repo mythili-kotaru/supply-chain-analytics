@@ -159,6 +159,36 @@ class ResumeResponse(BaseModel):
 
 # ── DB helper ─────────────────────────────────────────────────────────────────
 
+async def _get_supplier_config_payload(proposal_id: str) -> dict | None:
+    """Fetch the proposed supplier configuration changes from Postgres."""
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        row = await conn.fetchrow(
+            "SELECT supplier_config_payload FROM proposals WHERE id = $1",
+            proposal_id
+        )
+        if row and row["supplier_config_payload"]:
+            payload = row["supplier_config_payload"]
+            if isinstance(payload, str):
+                return json.loads(payload)
+            return dict(payload)
+    finally:
+        await conn.close()
+    return None
+
+
+async def update_proposal_supplier_config_payload(proposal_id: str, payload: dict) -> None:
+    """Update supplier config payload (e.g. after adding branch_name or pr_url)."""
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute(
+            "UPDATE proposals SET supplier_config_payload = $1::jsonb WHERE id = $2",
+            json.dumps(payload), proposal_id
+        )
+    finally:
+        await conn.close()
+
+
 async def update_proposal_thread_id(proposal_id: str, thread_id: str) -> None:
     """Store the LangGraph thread_id on the proposal row so /resume can find it."""
     conn = await asyncpg.connect(DATABASE_URL)
@@ -356,10 +386,16 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
 
     user_query = _build_user_query(req)
 
+    supplier_config_payload = None
+    if req.proposal_type == "supplier_config":
+        supplier_config_payload = await _get_supplier_config_payload(req.proposal_id)
+
     initial_state: dict[str, Any] = {
         "user_query": user_query,
         "user_role": req.user_role,
         "session_id": session_id,
+        "proposal_id": req.proposal_id,
+        "supplier_config_payload": supplier_config_payload,
         "messages": [HumanMessage(content=user_query)],
         "human_approved": None,
         "tuning_iterations": 0,
@@ -657,10 +693,16 @@ async def invoke_stream_generator(req: InvokeRequest, thread_id: str):
     queue = asyncio.Queue()
     user_query = _build_user_query(req)
 
+    supplier_config_payload = None
+    if req.proposal_type == "supplier_config":
+        supplier_config_payload = await _get_supplier_config_payload(req.proposal_id)
+
     initial_state: dict[str, Any] = {
         "user_query": user_query,
         "user_role": req.user_role,
         "session_id": thread_id,
+        "proposal_id": req.proposal_id,
+        "supplier_config_payload": supplier_config_payload,
         "messages": [HumanMessage(content=user_query)],
         "human_approved": None,
         "tuning_iterations": 0,

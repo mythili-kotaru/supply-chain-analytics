@@ -86,9 +86,25 @@ class ForecastTuningPayload(BaseModel):
     expected_mape_improvement: str
 
 
+class SupplierConfigPayload(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    lead_time_days: int
+    defect_rate: float
+    old_lead_time_days: Optional[int] = None
+    old_defect_rate: Optional[float] = None
+
+
+class ProposeSupplierConfigRequest(BaseModel):
+    supplier_id: str
+    lead_time_days: int
+    defect_rate: float
+    rationale: str
+
+
 class Proposal(BaseModel):
     id: str
-    type: str                # 'replenishment' | 'allocation' | 'forecast_tuning'
+    type: str                # 'replenishment' | 'allocation' | 'forecast_tuning' | 'supplier_config'
     status: str              # 'pending' | 'approved' | 'rejected'
     severity: str            # 'CRITICAL' | 'HIGH' | 'MEDIUM'
     created_at: str          # ISO string
@@ -102,6 +118,7 @@ class Proposal(BaseModel):
     replenishment: Optional[ReplenishmentPayload] = None
     allocation: Optional[AllocationPayload] = None
     forecast_tuning: Optional[ForecastTuningPayload] = None
+    supplier_config: Optional[SupplierConfigPayload] = None
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -126,3 +143,11 @@ class ApproveRejectResponse(BaseModel):
     id: str
     status: str
     message: str
+
+
+class SupplierModel(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    location: str
+    lead_time_days: int
+    defect_rate: float

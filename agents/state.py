@@ -73,6 +73,7 @@ class SupplyChainState(TypedDict):
     user_query: str           # raw query from the user
     user_role: str            # 'analyst' or 'admin' — passed to MCP server headers
     session_id: str           # for checkpointing and LangSmith tracing
+    proposal_id: str          # ID of the associated proposal in PostgreSQL
 
     # ─────────────────────────────────────────────
     # SQL INSIGHTS PIPELINE OUTPUT
@@ -91,12 +92,13 @@ class SupplyChainState(TypedDict):
     tuning_iterations: int            # how many auto-tune loops have run
 
     # ─────────────────────────────────────────────
-    # ALLOCATION / REPLENISHMENT
+    # ALLOCATION / REPLENISHMENT / SUPPLIER CONFIG
     # ─────────────────────────────────────────────
     allocation_task_id: str           # A2A task ID from Allocation Agent
     replenishment_task_id: str        # A2A task ID from Replenishment Agent
     allocation_result: dict[str, Any]
     replenishment_result: dict[str, Any]
+    supplier_config_payload: dict[str, Any]
 
     # ─────────────────────────────────────────────
     # HUMAN-IN-THE-LOOP

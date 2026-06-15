@@ -194,6 +194,7 @@ services:
       - ./services/langgraph_agent:/app   # hot reload in dev
       - ./agents:/app/agents              # shared agents package from repo root
       - langgraph_checkpoints:/tmp        # persist SQLite checkpoint DB across restarts
+      - .:/Users/mythilikotaru/Documents/supply-chain-ai
 
 volumes:
   pgdata:

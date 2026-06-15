@@ -31,7 +31,8 @@ from database import get_db
 from models import (
     Proposal, ProposalTrigger,
     ReplenishmentPayload, AllocationPayload, ForecastTuningPayload,
-    ApproveRejectResponse,
+    SupplierConfigPayload, ProposeSupplierConfigRequest, ApproveRejectResponse,
+    SupplierModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,11 @@ def _row_to_proposal(row: asyncpg.Record) -> Proposal:
     if fp:
         forecast_tuning = ForecastTuningPayload(**fp)
 
+    supplier_config = None
+    scp = _parse_jsonb(row["supplier_config_payload"])
+    if scp:
+        supplier_config = SupplierConfigPayload(**scp)
+
     return Proposal(
         id=row["id"],
         type=row["type"],
@@ -101,6 +107,7 @@ def _row_to_proposal(row: asyncpg.Record) -> Proposal:
         replenishment=replenishment,
         allocation=allocation,
         forecast_tuning=forecast_tuning,
+        supplier_config=supplier_config,
     )
 
 
@@ -422,3 +429,106 @@ async def reject_proposal_stream(
         resume_proxy_stream(db, proposal_id, approved=False, feedback="Rejected by ops manager", user_role=role),
         media_type="text/event-stream"
     )
+
+
+@router.post("/proposals/supplier-config", response_model=Proposal)
+async def propose_supplier_config(
+    req: ProposeSupplierConfigRequest,
+    db: asyncpg.Pool = Depends(get_db),
+    role: str = Depends(get_current_role)
+):
+    """
+    Propose a supplier configuration change.
+    Inserts a proposal row, then invokes LangGraph to serialize graph state and get thread_id.
+    """
+    import uuid
+    # 1. Fetch current supplier info from PostgreSQL
+    async with db.acquire() as conn:
+        supplier = await conn.fetchrow(
+            "SELECT supplier_name, lead_time_days, defect_rate FROM suppliers WHERE supplier_id = $1",
+            req.supplier_id
+        )
+        if not supplier:
+            raise HTTPException(status_code=404, detail=f"Supplier {req.supplier_id} not found")
+
+        proposal_id = str(uuid.uuid4())
+        
+        # Build payload
+        payload = {
+            "supplier_id": req.supplier_id,
+            "supplier_name": supplier["supplier_name"],
+            "lead_time_days": req.lead_time_days,
+            "defect_rate": req.defect_rate,
+            "old_lead_time_days": supplier["lead_time_days"],
+            "old_defect_rate": float(supplier["defect_rate"])
+        }
+        
+        # Insert proposal row
+        agent_reasoning = f"Proposed supplier config update for {supplier['supplier_name']} ({req.supplier_id}): {req.rationale}"
+        
+        row = await conn.fetchrow("""
+            INSERT INTO proposals (
+                id, type, status, severity, created_at,
+                trigger_product_id, trigger_product_name, trigger_location,
+                trigger_metric, trigger_current_value, trigger_threshold,
+                agent_reasoning, supplier_config_payload
+            ) VALUES (
+                $1, 'supplier_config', 'pending', 'MEDIUM', NOW(),
+                'N/A', $2, NULL,
+                'supplier_config', 0, 0,
+                $3, $4::jsonb
+            )
+            RETURNING *
+        """, proposal_id, supplier["supplier_name"], agent_reasoning, json.dumps(payload))
+
+    # 2. Invoke LangGraph agent to register the workflow and thread_id
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{LANGGRAPH_AGENT_URL}/invoke",
+                json={
+                    "proposal_id": proposal_id,
+                    "proposal_type": "supplier_config",
+                    "product_id": "N/A",
+                    "product_name": supplier["supplier_name"],
+                    "location": None,
+                    "severity": "MEDIUM",
+                    "trigger_metric": "supplier_config",
+                    "trigger_value": 0.0,
+                    "trigger_threshold": 0.0,
+                    "user_role": role
+                }
+            )
+            if resp.status_code == 200:
+                # Refresh proposal to return with the thread_id populated
+                async with db.acquire() as conn:
+                    updated_row = await conn.fetchrow("SELECT * FROM proposals WHERE id = $1", proposal_id)
+                    return _row_to_proposal(updated_row)
+            else:
+                logger.error(f"LangGraph invoke returned status {resp.status_code}: {resp.text}")
+    except Exception as e:
+        logger.error(f"Failed to invoke LangGraph agent for supplier config: {e}")
+
+    # Fallback return if invoke fails (still return the created proposal without thread_id)
+    return _row_to_proposal(row)
+
+
+@router.get("/suppliers", response_model=list[SupplierModel])
+async def get_suppliers(
+    db: asyncpg.Pool = Depends(get_db),
+    role: str = Depends(get_current_role)
+):
+    """
+    Get a list of all suppliers.
+    """
+    rows = await db.fetch("SELECT supplier_id, supplier_name, location, lead_time_days, defect_rate FROM suppliers ORDER BY supplier_id")
+    return [
+        SupplierModel(
+            supplier_id=r["supplier_id"],
+            supplier_name=r["supplier_name"],
+            location=r["location"],
+            lead_time_days=r["lead_time_days"],
+            defect_rate=float(r["defect_rate"])
+        )
+        for r in rows
+    ]

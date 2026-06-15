@@ -18,6 +18,7 @@ import type {
   DriftRecord,
   DriftHistory,
   AnomalyEvent,
+  SupplierModel,
 } from "@/types";
 
 // In Next.js, /api/... routes are always relative to the current origin
@@ -97,6 +98,15 @@ export const api = {
       `/proposals/${id}/reject`,
       { method: "POST" }
     ),
+
+  getSuppliers: () =>
+    apiFetch<SupplierModel[]>("/suppliers"),
+
+  proposeSupplierConfig: (payload: { supplier_id: string; lead_time_days: number; defect_rate: number; rationale: string }) =>
+    apiFetch<Proposal>("/proposals/supplier-config", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   // ── Drift detection ─────────────────────────────────────────────────────────
 

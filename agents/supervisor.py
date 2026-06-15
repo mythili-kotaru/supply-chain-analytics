@@ -459,6 +459,86 @@ async def _execute_forecast_tuning(state: SupplyChainState) -> str:
     return "No changes applied."
 
 
+async def _execute_supplier_config(state: SupplyChainState, config: Optional[RunnableConfig] = None) -> str:
+    """
+    Apply approved supplier configuration updates to the suppliers table in PostgreSQL,
+    and trigger the Git PR Agent to create a PR tracking the configuration update.
+    """
+    import json as _json
+    queue = config.get("configurable", {}).get("stream_queue") if config else None
+    payload = state.get("supplier_config_payload")
+
+    if not payload:
+        return "Supplier config execute: no payload found."
+
+    supplier_id = payload.get("supplier_id")
+    supplier_name = payload.get("supplier_name", "Supplier")
+    lead_time_days = payload.get("lead_time_days")
+    defect_rate = payload.get("defect_rate")
+    proposal_id = state.get("proposal_id", "")
+
+    if not supplier_id or lead_time_days is None or defect_rate is None:
+        return "Supplier config execute: invalid payload data."
+
+    try:
+        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
+        try:
+            async with pool.acquire() as conn:
+                if queue:
+                    await queue.put({"event": "thought", "message": f"Updating database record for supplier {supplier_name} ({supplier_id})..."})
+                
+                # Update PostgreSQL suppliers table
+                await conn.execute("""
+                    UPDATE suppliers
+                    SET lead_time_days = $1, defect_rate = $2
+                    WHERE supplier_id = $3
+                """, lead_time_days, defect_rate, supplier_id)
+
+                if queue:
+                    await queue.put({"event": "thought", "message": "Database record updated. Launching GitHub PR Agent..."})
+
+                # Trigger Git PR Agent
+                from agents.git_pr_agent import create_github_pr
+                pr_result = await create_github_pr(
+                    supplier_id=supplier_id,
+                    supplier_name=supplier_name,
+                    lead_time_days=lead_time_days,
+                    defect_rate=defect_rate,
+                    queue=queue
+                )
+
+                if pr_result.get("success"):
+                    pr_url = pr_result.get("pr_url")
+                    
+                    # Update proposal's supplier_config_payload to store the created branch and pr_url
+                    updated_payload = dict(payload)
+                    updated_payload["branch_name"] = pr_result.get("branch_name")
+                    updated_payload["pr_url"] = pr_url
+                    
+                    if proposal_id:
+                        await conn.execute("""
+                            UPDATE proposals
+                            SET supplier_config_payload = $1::jsonb
+                            WHERE id = $2
+                        """, _json.dumps(updated_payload), proposal_id)
+                    else:
+                        await conn.execute("""
+                            UPDATE proposals
+                            SET supplier_config_payload = $1::jsonb
+                            WHERE supplier_config_payload->>'supplier_id' = $2
+                            AND status = 'pending'
+                        """, _json.dumps(updated_payload), supplier_id)
+                    
+                    return f"Updated supplier {supplier_name} configurations. Branch: {pr_result.get('branch_name')}. PR Link generated."
+                else:
+                    return f"Updated supplier {supplier_name} configurations in DB, but Git failed: {pr_result.get('error')}"
+        finally:
+            await pool.close()
+    except Exception as e:
+        logger.error(f"Supplier config execute failed: {e}", exc_info=True)
+        return f"Supplier config execute error: {str(e)}"
+
+
 async def hitl_node(state: SupplyChainState, config: Optional[RunnableConfig] = None) -> dict:
     """
     Pause and wait for human approval before taking any 'action'.
@@ -500,6 +580,12 @@ async def hitl_node(state: SupplyChainState, config: Optional[RunnableConfig] = 
                 msg = await _execute_forecast_tuning(state)
                 execution_messages.append(f"Forecast tuning: {msg}")
 
+            if intent == "supplier_config" or state.get("supplier_config_payload"):
+                if queue:
+                    await queue.put({"event": "thought", "message": "Applying supplier configuration changes..."})
+                msg = await _execute_supplier_config(state, config)
+                execution_messages.append(f"Supplier config: {msg}")
+
             summary = " | ".join(execution_messages) if execution_messages else "Action approved and executed."
             if queue:
                 await queue.put({"event": "thought", "message": f"Execution finished successfully: {summary}"})
@@ -521,6 +607,7 @@ async def hitl_node(state: SupplyChainState, config: Optional[RunnableConfig] = 
         "proposed_tuning": state.get("proposed_tuning"),
         "allocation_result": state.get("allocation_result"),
         "replenishment_result": state.get("replenishment_result"),
+        "supplier_config_payload": state.get("supplier_config_payload"),
         "message": "Review the proposed action and approve or reject."
     }
 
@@ -570,6 +657,12 @@ async def hitl_node(state: SupplyChainState, config: Optional[RunnableConfig] = 
                 await queue.put({"event": "thought", "message": "Applying forecast hyperparameter changes..."})
             msg = await _execute_forecast_tuning(state)
             execution_messages.append(f"Forecast tuning: {msg}")
+
+        if intent == "supplier_config" or state.get("supplier_config_payload"):
+            if queue:
+                await queue.put({"event": "thought", "message": "Applying supplier configuration changes..."})
+            msg = await _execute_supplier_config(state, config)
+            execution_messages.append(f"Supplier config: {msg}")
 
         summary = " | ".join(execution_messages) if execution_messages else "Action approved and executed."
         if queue:
