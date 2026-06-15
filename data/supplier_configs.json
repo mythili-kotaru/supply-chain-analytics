@@ -1,0 +1,32 @@
+{
+  "SUP-001": {
+    "supplier_name": "Kolkata Cosmetics Co.",
+    "location": "Kolkata",
+    "lead_time_days": 15,
+    "defect_rate": 0.02
+  },
+  "SUP-002": {
+    "supplier_name": "Mumbai Beauty Works",
+    "location": "Mumbai",
+    "lead_time_days": 12,
+    "defect_rate": 0.015
+  },
+  "SUP-003": {
+    "supplier_name": "Chennai Chem Labs",
+    "location": "Chennai",
+    "lead_time_days": 18,
+    "defect_rate": 0.028
+  },
+  "SUP-004": {
+    "supplier_name": "Delhi Packaging Ltd.",
+    "location": "Delhi",
+    "lead_time_days": 10,
+    "defect_rate": 0.012
+  },
+  "SUP-005": {
+    "supplier_name": "Bangalore Bio Products",
+    "location": "Bangalore",
+    "lead_time_days": 8,
+    "defect_rate": 0.018
+  }
+}
