@@ -31,6 +31,8 @@ import asyncio
 import asyncpg
 import logging
 import base64
+import time
+import tiktoken
 import wren
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -149,56 +151,127 @@ sql_llm = ChatOpenAI(model="gpt-4o", temperature=0)
 formatter_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
 
 # ─────────────────────────────────────────────
-# SEMANTIC SCHEMA (simulating Wren Engine)
+# WREN SEMANTIC & DDL SCHEMAS
 #
-# In a real Wren integration, this would be your data model definition
-# sent to the Wren Engine API. Wren would return optimized SQL.
+# Real Wren integration utilizes the structured JSON manifest (MDL)
+# to dynamically construct a concise prompt context.
 #
-# HERE we simulate it: we give the LLM a semantic schema description
-# instead of the raw DDL. This reduces token count significantly:
-#   - Raw DDL: ~800 tokens (full CREATE TABLE statements)
-#   - Semantic schema: ~200 tokens (just the meaningful fields)
-
+# We compare this against the traditional Raw DDL schema approach
+# to measure the exact token reduction and compile validity.
 # ─────────────────────────────────────────────
-SEMANTIC_SCHEMA = """
-Available data for supply chain analytics:
 
-PRODUCTS (products):
-  - product: product_id, product_name, category (skincare/haircare/cosmetics), price
-
-TRANSACTIONS (supply_chain_records):
-  - product: product_id
-  - location: region (Northeast/Southeast/West/Midwest)
-  - financials: revenue, shipping_costs, manufacturing_costs
-  - quantities: order_quantity
-  - dates: order_date, ship_date, delivery_date
-  - segment: customer_segment (retail/wholesale)
-
-INVENTORY (inventory):
-  - product: product_id
-  - location: location (same regions as above)
-  - stock: stock_level, reorder_point, max_capacity
-  - derived: status (CRITICAL when stock < reorder_point)
-
-FORECASTING (forecast_metrics):
-  - product: product_id
-  - accuracy: mape (lower is better, >0.15 is high error)
-  - model: model_name, hyperparameters (JSON)
-  - when: run_date
-
-RELATIONSHIPS:
-  - supply_chain_records joins products via product_id
-  - inventory joins products via product_id
-  - forecast_metrics joins products via product_id
-
-RULES:
+def get_wren_schema_prompt(manifest: dict) -> str:
+    lines = ["Wren Semantic Model Schema:"]
+    for model in manifest.get("models", []):
+        model_name = model.get("name")
+        table_name = model.get("tableReference", {}).get("table")
+        lines.append(f"\nModel: {model_name} (maps to table: {table_name})")
+        cols = []
+        for col in model.get("columns", []):
+            cols.append(f"{col.get('name')} ({col.get('type')})")
+        lines.append(f"  Columns: {', '.join(cols)}")
+        if model.get("primaryKey"):
+            lines.append(f"  Primary Key: {model.get('primaryKey')}")
+            
+    if manifest.get("relationships"):
+        lines.append("\nRelationships:")
+        for rel in manifest.get("relationships", []):
+            lines.append(f"  - {rel.get('name')}: {rel.get('models')[0]} joins {rel.get('models')[1]} ON {rel.get('condition')}")
+            
+    lines.append("""
+Rules:
   - Always include product_name in SELECT (not just product_id)
   - For stockout risk: WHERE stock_level < reorder_point
   - For MAPE analysis: ORDER BY mape DESC to find worst performers
   - Date format: 'YYYY-MM-DD'
-  - Use Postgres syntax (not MySQL/SQLite)
+  - Use Postgres syntax
+""")
+    return "\n".join(lines)
+
+
+RAW_DDL_SCHEMA = """
+PostgreSQL Database Schema (DDL):
+
+CREATE TABLE products (
+    product_id      TEXT PRIMARY KEY,
+    product_name    TEXT NOT NULL,
+    category        TEXT NOT NULL,
+    price           NUMERIC(10, 2),
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE suppliers (
+    supplier_id     TEXT PRIMARY KEY,
+    supplier_name   TEXT NOT NULL,
+    location        TEXT,
+    lead_time_days  INTEGER,
+    defect_rate     NUMERIC(5, 4)
+);
+
+CREATE TABLE inventory (
+    id              SERIAL PRIMARY KEY,
+    product_id      TEXT REFERENCES products(product_id),
+    location        TEXT NOT NULL,
+    stock_level     INTEGER NOT NULL,
+    reorder_point   INTEGER NOT NULL,
+    max_capacity    INTEGER NOT NULL,
+    last_updated    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE supply_chain_records (
+    record_id           SERIAL PRIMARY KEY,
+    product_id          TEXT REFERENCES products(product_id),
+    supplier_id         TEXT REFERENCES suppliers(supplier_id),
+    order_quantity      INTEGER,
+    order_date          DATE,
+    ship_date           DATE,
+    delivery_date       DATE,
+    shipping_costs      NUMERIC(10, 2),
+    manufacturing_costs NUMERIC(10, 2),
+    revenue             NUMERIC(10, 2),
+    region              TEXT,
+    customer_segment    TEXT,
+    embedding           vector(1536),
+    search_vector       tsvector
+);
+
+CREATE TABLE forecast_metrics (
+    id              SERIAL PRIMARY KEY,
+    product_id      TEXT REFERENCES products(product_id),
+    run_date        DATE NOT NULL,
+    model_name      TEXT NOT NULL,
+    mape            NUMERIC(6, 4),
+    mae             NUMERIC(10, 2),
+    hyperparameters JSONB,
+    notes           TEXT
+);
+
+CREATE TABLE hyperparameter_tuning_log (
+    id              SERIAL PRIMARY KEY,
+    product_id      TEXT REFERENCES products(product_id),
+    agent_run_id    TEXT,
+    proposed_at     TIMESTAMPTZ DEFAULT NOW(),
+    old_params      JSONB,
+    new_params      JSONB,
+    rationale       TEXT,
+    status          TEXT DEFAULT 'proposed'
+);
+
+Rules:
+  - Always join supply_chain_records/inventory/forecast_metrics with products using product_id to get product_name
+  - Always include product_name in SELECT (not just product_id)
+  - For stockout risk: WHERE stock_level < reorder_point
+  - For MAPE analysis: ORDER BY mape DESC to find worst performers
+  - Date format: 'YYYY-MM-DD'
+  - Use Postgres syntax
 """
 
+def count_tokens(text: str, model: str = "gpt-4o") -> int:
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+        return len(encoding.encode(text))
+    except Exception:
+        return len(text.split())
 
 from typing import Optional
 
@@ -243,46 +316,100 @@ Return ONLY a JSON object with:
     logger.info(f"Parsed intent: {parsed_intent}")
 
     # ─────────────────────────────────────────────
-    # NODE 2: SQL GENERATOR (with semantic schema / Wren simulation)
+    # NODE 2: SQL GENERATION (Wren Manifest vs Raw DDL Comparison)
     #
-    # WHY pass the semantic schema instead of raw DDL?
-    # Token efficiency. The LLM only needs to know the meaningful fields,
-    # not the full CREATE TABLE with constraints, defaults, and indexes.
-    # In a real Wren integration, Wren itself generates the SQL from a
-    # semantic model definition — you'd call wren_engine.query(intent).
+    # We run both generation prompts concurrently to compare performance metrics,
+    # token count reductions, and compiled query outcomes.
     # ─────────────────────────────────────────────
-    sql_response = await sql_llm.ainvoke([
-        SystemMessage(content=f"""Generate a valid Postgres SQL query for supply chain analytics.
+    wren_schema = get_wren_schema_prompt(WREN_MANIFEST_DICT)
+
+    async def run_wren_path():
+        start_time = time.time()
+        wren_prompt_tokens = count_tokens(wren_schema) + count_tokens(query) + 100
+        wren_resp = await sql_llm.ainvoke([
+            SystemMessage(content=f"""Generate a valid Postgres SQL query for supply chain analytics.
 Use ONLY the schema described below. Return ONLY the SQL query, nothing else.
 
-{SEMANTIC_SCHEMA}
+{wren_schema}
 
 Intent details: {json.dumps(parsed_intent)}"""),
-        HumanMessage(content=query)
-    ])
+            HumanMessage(content=query)
+        ])
+        latency = (time.time() - start_time) * 1000
+        wren_sql = wren_resp.content.strip()
+        if wren_sql.startswith("```"):
+            wren_sql = wren_sql.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        
+        wren_compiled = False
+        compiled_query = wren_sql
+        try:
+            engine = wren.WrenEngine(
+                manifest_str=WREN_MANIFEST_B64,
+                data_source="postgres",
+                connection_info={}
+            )
+            compiled_query = engine.dry_plan(wren_sql)
+            wren_compiled = True
+        except Exception as e:
+            logger.warning(f"Wren Engine compilation failed: {e}")
+            
+        return {
+            "mode": "wren",
+            "prompt_tokens": wren_prompt_tokens,
+            "completion_tokens": count_tokens(wren_sql),
+            "total_tokens": wren_prompt_tokens + count_tokens(wren_sql),
+            "latency_ms": latency,
+            "sql_generated": wren_sql,
+            "sql_compiled": compiled_query,
+            "wren_compiled": wren_compiled
+        }
 
-    sql_query = sql_response.content.strip()
-    # Clean up markdown code fences if present
-    if sql_query.startswith("```"):
-        sql_query = sql_query.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+    async def run_ddl_path():
+        start_time = time.time()
+        ddl_prompt_tokens = count_tokens(RAW_DDL_SCHEMA) + count_tokens(query) + 100
+        ddl_resp = await sql_llm.ainvoke([
+            SystemMessage(content=f"""Generate a valid Postgres SQL query for supply chain analytics.
+Use ONLY the schema described below. Return ONLY the SQL query, nothing else.
 
-    logger.info(f"Generated Semantic SQL: {sql_query[:200]}...")
+{RAW_DDL_SCHEMA}
 
-    # ─────────────────────────────────────────────
-    # WREN ENGINE COMPILATION
-    # Compile the semantic SQL query using Wren Engine.
-    # ─────────────────────────────────────────────
-    try:
-        engine = wren.WrenEngine(
-            manifest_str=WREN_MANIFEST_B64,
-            data_source="postgres",
-            connection_info={}
-        )
-        compiled_query = engine.dry_plan(sql_query)
-        logger.info(f"Wren Engine successfully compiled SQL query.")
-        sql_query = compiled_query
-    except Exception as e:
-        logger.warning(f"Wren Engine compilation failed: {e}. Falling back to raw semantic query.")
+Intent details: {json.dumps(parsed_intent)}"""),
+            HumanMessage(content=query)
+        ])
+        latency = (time.time() - start_time) * 1000
+        ddl_sql = ddl_resp.content.strip()
+        if ddl_sql.startswith("```"):
+            ddl_sql = ddl_sql.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            
+        ddl_compiled = False
+        try:
+            engine = wren.WrenEngine(
+                manifest_str=WREN_MANIFEST_B64,
+                data_source="postgres",
+                connection_info={}
+            )
+            engine.dry_plan(ddl_sql)
+            ddl_compiled = True
+        except Exception:
+            pass
+            
+        return {
+            "mode": "ddl",
+            "prompt_tokens": ddl_prompt_tokens,
+            "completion_tokens": count_tokens(ddl_sql),
+            "total_tokens": ddl_prompt_tokens + count_tokens(ddl_sql),
+            "latency_ms": latency,
+            "sql_generated": ddl_sql,
+            "sql_compiled": ddl_sql,
+            "wren_compiled": ddl_compiled
+        }
+
+    wren_stats, ddl_stats = await asyncio.gather(run_wren_path(), run_ddl_path())
+    
+    sql_query = wren_stats["sql_compiled"]
+    token_saving_pct = ((ddl_stats["prompt_tokens"] - wren_stats["prompt_tokens"]) / ddl_stats["prompt_tokens"]) * 100
+    
+    logger.info(f"Wren path compiled: {wren_stats['wren_compiled']}. Saved {token_saving_pct:.1f}% prompt tokens.")
 
     # ─────────────────────────────────────────────
     # EXECUTE THE SQL
@@ -358,4 +485,7 @@ Mention specific numbers. Be concise — no bullet points, just prose."""),
         "parsed_intent": parsed_intent,
         "result_count": len(results),
         "error": sql_error,
+        "wren_stats": wren_stats,
+        "ddl_stats": ddl_stats,
+        "token_saving_pct": round(token_saving_pct, 2),
     }

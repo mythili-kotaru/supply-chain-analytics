@@ -130,6 +130,12 @@ export const api = {
   triggerMonitorRun: () =>
     apiFetch<{ status: string; results: Record<string, string> }>("/monitor/run", { method: "POST" }),
 
+  runAnalyticsQuery: (query: string) =>
+    apiFetch<any>("/analytics/query", {
+      method: "POST",
+      body: JSON.stringify({ query }),
+    }),
+
   // ── Charts ──────────────────────────────────────────────────────────────────
 
   getInventoryHealthChart: () =>

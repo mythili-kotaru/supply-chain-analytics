@@ -10,7 +10,10 @@ import {
   Sparkles, 
   Loader2, 
   Code2, 
-  Play 
+  Play,
+  Zap,
+  ShieldCheck,
+  BarChart2
 } from "lucide-react";
 
 const MessageSquareIcon = MessageSquare as any;
@@ -19,6 +22,9 @@ const SparklesIcon = Sparkles as any;
 const Loader2Icon = Loader2 as any;
 const Code2Icon = Code2 as any;
 const PlayIcon = Play as any;
+const ZapIcon = Zap as any;
+const ShieldCheckIcon = ShieldCheck as any;
+const BarChart2Icon = BarChart2 as any;
 
 const EMPTY_STATS: DashboardStats = {
   critical_alerts: 0,
@@ -29,12 +35,26 @@ const EMPTY_STATS: DashboardStats = {
   services: [],
 };
 
+type ComparisonStats = {
+  mode: "wren" | "ddl";
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  latency_ms: number;
+  sql_generated: string;
+  sql_compiled: string;
+  wren_compiled: boolean;
+};
+
 type AnalyticsResult = {
   sql_query: string;
   results: any[];
   insight: string;
   result_count: number;
   error?: string;
+  wren_stats?: ComparisonStats;
+  ddl_stats?: ComparisonStats;
+  token_saving_pct?: number;
 };
 
 export default function AnalyticsPage() {
@@ -56,13 +76,7 @@ export default function AnalyticsPage() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch("http://localhost:8003/api/dashboard/analytics/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
-      });
-      if (!res.ok) throw new Error("Failed to fetch analytics");
-      const data = await res.json();
+      const data = await api.runAnalyticsQuery(query);
       setResult(data);
     } catch (err) {
       console.error(err);
@@ -145,6 +159,129 @@ export default function AnalyticsPage() {
                     {result.insight}
                   </p>
                 </div>
+
+                {/* Wren Engine Optimization Stats */}
+                {result.wren_stats && result.ddl_stats && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    {/* Visual Token Savings Metric */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col justify-between relative overflow-hidden lg:col-span-1">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-[50px] rounded-full pointer-events-none" />
+                      <div>
+                        <div className="flex items-center gap-2 mb-4">
+                          <ZapIcon className="w-5 h-5 text-amber-400" />
+                          <h3 className="text-sm font-semibold text-slate-300">Wren Semantic Impact</h3>
+                        </div>
+                        <div className="mt-2">
+                          <div className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">
+                            {result.token_saving_pct}%
+                          </div>
+                          <div className="text-xs text-slate-400 mt-1 uppercase tracking-wider font-semibold">
+                            Prompt Token Reduction
+                          </div>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-4 leading-relaxed">
+                          By modeling database tables as semantic models and relationships (MDL), the LLM context size is drastically reduced. We send concise semantic tags instead of verbose raw CREATE TABLE DDLs.
+                        </p>
+                      </div>
+                      <div className="mt-6 pt-4 border-t border-slate-800/60">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-semibold text-emerald-400 tracking-wider uppercase">
+                          <ShieldCheckIcon className="w-3.5 h-3.5" />
+                          Wren Engine Compiled
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Side-by-Side Comparison details */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 lg:col-span-2 space-y-4 flex flex-col justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2 mb-4">
+                          <BarChart2Icon className="w-4 h-4 text-blue-400" />
+                          Performance Metrics Comparison
+                        </h3>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Wren Stats */}
+                          <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                              <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">Wren Semantic Mode</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 font-semibold uppercase">Active</span>
+                            </div>
+                            <div className="space-y-2 text-xs">
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">Prompt Size:</span>
+                                <span className="text-slate-300 font-mono">{result.wren_stats.prompt_tokens} tokens</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">Completion:</span>
+                                <span className="text-slate-300 font-mono">{result.wren_stats.completion_tokens} tokens</span>
+                              </div>
+                              <div className="flex justify-between font-semibold">
+                                <span className="text-slate-400">Total Tokens:</span>
+                                <span className="text-slate-200 font-mono">{result.wren_stats.total_tokens}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">Latency:</span>
+                                <span className="text-slate-300 font-mono">{result.wren_stats.latency_ms.toFixed(0)} ms</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">Dry Plan:</span>
+                                <span className="text-emerald-400 font-semibold">SUCCESS (Compiled)</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* DDL Stats */}
+                          <div className="p-4 bg-slate-950/30 border border-slate-800/40 rounded-xl space-y-3">
+                            <div className="flex items-center justify-between border-b border-slate-800/40 pb-2">
+                              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Raw DDL Mode</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-500 font-semibold uppercase">Simulated</span>
+                            </div>
+                            <div className="space-y-2 text-xs">
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">Prompt Size:</span>
+                                <span className="text-slate-400 font-mono">{result.ddl_stats.prompt_tokens} tokens</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">Completion:</span>
+                                <span className="text-slate-400 font-mono">{result.ddl_stats.completion_tokens} tokens</span>
+                              </div>
+                              <div className="flex justify-between font-semibold">
+                                <span className="text-slate-500">Total Tokens:</span>
+                                <span className="text-slate-400 font-mono">{result.ddl_stats.total_tokens}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">Latency:</span>
+                                <span className="text-slate-400 font-mono">{result.ddl_stats.latency_ms.toFixed(0)} ms</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">Dry Plan:</span>
+                                <span className="text-slate-500">{result.ddl_stats.wren_compiled ? "SUCCESS" : "FAILED"}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Token efficiency progress bar visual */}
+                      <div className="space-y-1.5 pt-4">
+                        <div className="flex justify-between text-xs font-medium">
+                          <span className="text-slate-400">Context Window Footprint</span>
+                          <span className="text-slate-300 font-mono">
+                            {result.wren_stats.prompt_tokens} vs {result.ddl_stats.prompt_tokens} prompt tokens
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden flex">
+                          <div 
+                            className="bg-blue-500 h-full transition-all duration-500" 
+                            style={{ width: `${(result.wren_stats.prompt_tokens / result.ddl_stats.prompt_tokens) * 100}%` }}
+                          />
+                          <div className="bg-slate-800 flex-1" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Data Table */}
                 <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">

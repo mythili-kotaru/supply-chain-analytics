@@ -966,12 +966,25 @@ class AnalyticsQueryRequest(BaseModel):
     query: str
     role: str = "analyst"
 
+class AnalyticsComparisonStats(BaseModel):
+    mode: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    latency_ms: float
+    sql_generated: str
+    sql_compiled: str
+    wren_compiled: bool
+
 class AnalyticsQueryResponse(BaseModel):
     sql_query: str
     results: list[dict[str, Any]]
     insight: str
     result_count: int
     error: Optional[str] = None
+    wren_stats: Optional[AnalyticsComparisonStats] = None
+    ddl_stats: Optional[AnalyticsComparisonStats] = None
+    token_saving_pct: Optional[float] = None
 
 @app.post("/analytics/query", response_model=AnalyticsQueryResponse)
 async def run_analytics_query(req: AnalyticsQueryRequest):
@@ -994,7 +1007,10 @@ async def run_analytics_query(req: AnalyticsQueryRequest):
                 results=result.get("results", []),
                 insight=result.get("insight", ""),
                 result_count=result.get("result_count", 0),
-                error=result.get("error")
+                error=result.get("error"),
+                wren_stats=result.get("wren_stats"),
+                ddl_stats=result.get("ddl_stats"),
+                token_saving_pct=result.get("token_saving_pct")
             )
         finally:
             await pool.close()

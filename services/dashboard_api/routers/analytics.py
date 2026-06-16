@@ -15,12 +15,25 @@ class AnalyticsQueryRequest(BaseModel):
     query: str
     role: str = "analyst"
 
+class AnalyticsComparisonStats(BaseModel):
+    mode: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    latency_ms: float
+    sql_generated: str
+    sql_compiled: str
+    wren_compiled: bool
+
 class AnalyticsQueryResponse(BaseModel):
     sql_query: str
     results: List[Dict[str, Any]]
     insight: str
     result_count: int
     error: Optional[str] = None
+    wren_stats: Optional[AnalyticsComparisonStats] = None
+    ddl_stats: Optional[AnalyticsComparisonStats] = None
+    token_saving_pct: Optional[float] = None
 
 @router.post("/query", response_model=AnalyticsQueryResponse)
 async def execute_analytics_query(request: AnalyticsQueryRequest):
