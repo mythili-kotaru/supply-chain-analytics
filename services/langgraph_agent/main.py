@@ -202,6 +202,100 @@ async def update_proposal_thread_id(proposal_id: str, thread_id: str) -> None:
         await conn.close()
 
 
+async def send_slack_webhook(proposal_id: str) -> None:
+    """Fetch proposal from DB and send interactive Slack alert."""
+    import httpx
+    slack_webhook = os.getenv("SLACK_WEBHOOK_URL")
+    if not slack_webhook:
+        slack_webhook = "http://dashboard_api:8003/api/dashboard/proposals/slack-webhook-mock"
+
+    logger.info(f"Preparing Slack notification for proposal {proposal_id} via {slack_webhook}")
+    
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        row = await conn.fetchrow(
+            "SELECT severity, type, agent_reasoning FROM proposals WHERE id = $1",
+            proposal_id
+        )
+        if not row:
+            logger.warning(f"Proposal {proposal_id} not found in DB, skipping Slack notification")
+            return
+            
+        severity = row["severity"] or "MEDIUM"
+        prop_type = row["type"] or "replenishment"
+        description = row["agent_reasoning"] or "Awaiting review."
+    except Exception as db_err:
+        logger.error(f"Failed to fetch proposal {proposal_id} from DB for Slack notification: {db_err}")
+        return
+    finally:
+        await conn.close()
+
+    try:
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "🚨 New Supply Chain Proposal Awaiting Approval",
+                    "emoji": True
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Proposal ID:* `{proposal_id}`\n*Type:* `{prop_type.upper()}`\n*Severity:* `{severity}`"
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Description:*\n{description}"
+                }
+            },
+            {
+                "type": "actions",
+                "block_id": f"actions_{proposal_id}",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Approve",
+                            "emoji": True
+                        },
+                        "style": "primary",
+                        "action_id": "approve_action",
+                        "value": json.dumps({"proposal_id": proposal_id, "action": "approve"})
+                    },
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Reject",
+                            "emoji": True
+                        },
+                        "style": "danger",
+                        "action_id": "reject_action",
+                        "value": json.dumps({"proposal_id": proposal_id, "action": "reject"})
+                    }
+                ]
+            }
+        ]
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(slack_webhook, json={
+                "proposal_id": proposal_id,
+                "text": f"New proposal awaiting approval: {description}",
+                "blocks": blocks
+            })
+            logger.info(f"Slack webhook sent for proposal {proposal_id}, status code: {resp.status_code}")
+    except Exception as slack_err:
+        logger.error(f"Failed to send Slack webhook: {slack_err}")
+
+
+
 async def update_proposal_status(proposal_id: str, status: str) -> None:
     """Update proposal status after graph completes."""
     conn = await asyncpg.connect(DATABASE_URL)
@@ -420,6 +514,7 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
         result = await _astream_until_interrupt(app, initial_state, config)
 
     await update_proposal_thread_id(req.proposal_id, thread_id)
+    await send_slack_webhook(req.proposal_id)
 
     # ── Write agent results back to proposal payload columns ─────────────────
     # The graph nodes compute results and store them in graph state only.
@@ -768,6 +863,7 @@ async def invoke_stream_generator(req: InvokeRequest, thread_id: str):
                             
             await queue.put({"event": "thought", "message": "Saving execution state and metadata to PostgreSQL..."})
             await update_proposal_thread_id(req.proposal_id, thread_id)
+            await send_slack_webhook(req.proposal_id)
             
             if req.proposal_type == "forecast_tuning" and proposed_tuning:
                 try:

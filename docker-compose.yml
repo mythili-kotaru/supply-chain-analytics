@@ -130,6 +130,7 @@ services:
       ALLOCATION_AGENT_URL: http://allocation_agent:8001
       REPLENISHMENT_AGENT_URL: http://replenishment_agent:8002
       LANGGRAPH_AGENT_URL: http://langgraph_agent:8004   # Day 4
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
     ports:
       - "8003:8003"
     depends_on:
@@ -174,6 +175,7 @@ services:
       REPLENISHMENT_AGENT_URL: http://replenishment_agent:8002
       MCP_SERVER_URL: http://mcp_server:8000
       CHECKPOINT_DB: /tmp/supply_chain_checkpoints.db
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       # LangSmith tracing (Day 5)
       # Your shell env has LANG_SMITH_API_KEY — we map it to the name LangChain expects.
       # LANGCHAIN_TRACING_V2=true enables automatic tracing of all LLM calls and graph runs.

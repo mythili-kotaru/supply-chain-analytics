@@ -21,7 +21,7 @@ import os
 import logging
 import re
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Form
 from fastapi.responses import StreamingResponse
 import asyncpg
 import httpx
@@ -532,3 +532,120 @@ async def get_suppliers(
         )
         for r in rows
     ]
+
+
+# ── Slack Webhook & Action mock buffers ───────────────────────────────────────
+slack_router = APIRouter()
+LAST_SLACK_MESSAGE = None
+LAST_SLACK_RESPONSE = None
+
+@slack_router.post("/proposals/slack-webhook-mock")
+async def slack_webhook_mock(req: dict):
+    global LAST_SLACK_MESSAGE
+    logger.info(f"Mock Slack Webhook received payload: {req}")
+    
+    # Inject a local response_url pointing to our mock response handler
+    proposal_id = req.get("proposal_id", "unknown")
+    payload = dict(req)
+    payload["response_url"] = f"http://dashboard_api:8003/api/dashboard/proposals/slack-response-mock/{proposal_id}"
+    
+    LAST_SLACK_MESSAGE = payload
+    return {"status": "ok", "message": "Webhook payload received locally."}
+
+@slack_router.get("/proposals/slack-webhook-mock/last")
+async def get_last_slack_webhook():
+    global LAST_SLACK_MESSAGE
+    return LAST_SLACK_MESSAGE or {}
+
+@slack_router.post("/proposals/slack-response-mock/{proposal_id}")
+async def slack_response_mock(proposal_id: str, req: dict):
+    global LAST_SLACK_RESPONSE
+    logger.info(f"Mock Slack response endpoint received payload for {proposal_id}: {req}")
+    LAST_SLACK_RESPONSE = req
+    return {"status": "ok", "message": "Slack response mock stored."}
+
+@slack_router.get("/proposals/slack-response-mock/last")
+async def get_last_slack_response():
+    global LAST_SLACK_RESPONSE
+    return LAST_SLACK_RESPONSE or {}
+
+@slack_router.post("/proposals/slack-action")
+async def slack_action(payload: str = Form(...), db: asyncpg.Pool = Depends(get_db)):
+    """
+    Handle interactive action payload from Slack.
+    Uses application/x-www-form-urlencoded parsing.
+    """
+    try:
+        data = json.loads(payload)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid payload JSON: {e}")
+
+    actions = data.get("actions", [])
+    if not actions:
+        raise HTTPException(status_code=400, detail="No action payload found")
+
+    action_value_str = actions[0].get("value")
+    try:
+        action_value = json.loads(action_value_str)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid action value JSON: {e}")
+
+    proposal_id = action_value.get("proposal_id")
+    action = action_value.get("action")
+    user_info = data.get("user", {})
+    username = user_info.get("username", "Slack User")
+    response_url = data.get("response_url")
+
+    if not proposal_id or not action:
+        raise HTTPException(status_code=400, detail="proposal_id and action are required in button value")
+
+    approved = (action == "approve")
+    new_status = "approved" if approved else "rejected"
+
+    logger.info(f"Slack action received: proposal={proposal_id} action={action} user={username}")
+
+    # Process resume via _update_proposal_status (simulates Admin role)
+    result = await _update_proposal_status(
+        db=db,
+        proposal_id=proposal_id,
+        new_status=new_status,
+        feedback=f"Action taken via Slack by @{username}",
+        user_role="admin"
+    )
+
+    # Replace original Slack message actions block with status text
+    if response_url:
+        orig_blocks = data.get("message", {}).get("blocks", [])
+        if not orig_blocks and "message" in data:
+            orig_blocks = data["message"].get("blocks", [])
+            
+        # Filter out actions block
+        updated_blocks = [b for b in orig_blocks if b.get("type") != "actions"]
+        
+        status_emoji = "✅" if approved else "❌"
+        action_past_tense = "Approved" if approved else "Rejected"
+        updated_blocks.append({
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"{status_emoji} *{action_past_tense}* by @{username} via Slack."
+                }
+            ]
+        })
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(response_url, json={
+                    "replace_original": True,
+                    "blocks": updated_blocks
+                })
+        except Exception as update_err:
+            logger.error(f"Failed to update Slack message via response_url: {update_err}")
+
+    return {
+        "status": "ok",
+        "message": f"Proposal {proposal_id} successfully {action_past_tense.lower()}."
+    }
+
+
