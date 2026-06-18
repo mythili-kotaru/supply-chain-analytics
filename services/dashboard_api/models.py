@@ -54,6 +54,7 @@ class PurchaseOrder(BaseModel):
     order_value: float
     lead_time_days: int
     expected_delivery: str
+    jira_ticket_key: Optional[str] = None
 
 
 class ReplenishmentPayload(BaseModel):

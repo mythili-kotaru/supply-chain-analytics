@@ -413,7 +413,19 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                   {proposal.replenishment.purchase_orders.map((po) => (
                     <div key={po.po_number} className="px-3 py-2.5 text-xs">
                       <div className="flex items-center justify-between mb-1.5">
-                        <span className="font-mono text-slate-400">{po.po_number}</span>
+                        <span className="font-mono text-slate-400 flex items-center gap-2">
+                          {po.po_number}
+                          {po.jira_ticket_key && (
+                            <a
+                              href={`http://localhost:8003/api/dashboard/jira/browse/${po.jira_ticket_key}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] text-sky-400 hover:text-sky-300 hover:underline font-mono"
+                            >
+                              🎫 {po.jira_ticket_key}
+                            </a>
+                          )}
+                        </span>
                         <span className="font-semibold text-white">${po.order_value.toLocaleString()}</span>
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-500">

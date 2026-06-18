@@ -649,3 +649,49 @@ async def slack_action(payload: str = Form(...), db: asyncpg.Pool = Depends(get_
     }
 
 
+# ── Jira Mock endpoints ───────────────────────────────────────────────────────
+MOCK_JIRA_TICKETS = []
+MOCK_JIRA_COUNTER = 100
+
+@slack_router.post("/jira/mock-ticket")
+async def jira_mock_ticket(req: dict):
+    global MOCK_JIRA_TICKETS, MOCK_JIRA_COUNTER
+    from datetime import datetime
+    logger.info(f"Mock Jira Ticket request received: {req}")
+    
+    summary = req.get("summary", "New PO")
+    description = req.get("description", "")
+    po_number = req.get("po_number", "UNKNOWN")
+    
+    MOCK_JIRA_COUNTER += 1
+    issue_key = f"SC-{MOCK_JIRA_COUNTER}"
+    
+    ticket = {
+        "key": issue_key,
+        "summary": summary,
+        "description": description,
+        "po_number": po_number,
+        "status": "To Do",
+        "created_at": datetime.utcnow().isoformat(),
+        "self": f"http://dashboard_api:8003/api/dashboard/jira/browse/{issue_key}"
+    }
+    
+    MOCK_JIRA_TICKETS.append(ticket)
+    logger.info(f"Mock Jira Ticket created: {issue_key} for PO {po_number}")
+    return ticket
+
+@slack_router.get("/jira/mock-ticket/last")
+async def get_last_jira_ticket():
+    global MOCK_JIRA_TICKETS
+    return MOCK_JIRA_TICKETS[-1] if MOCK_JIRA_TICKETS else {}
+
+@slack_router.get("/jira/browse/{key}")
+async def jira_browse_ticket(key: str):
+    global MOCK_JIRA_TICKETS
+    ticket = next((t for t in MOCK_JIRA_TICKETS if t["key"] == key), None)
+    if not ticket:
+        raise HTTPException(status_code=404, detail=f"Jira ticket {key} not found")
+    return ticket
+
+
+

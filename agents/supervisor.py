@@ -311,7 +311,7 @@ async def _execute_allocation(task_id: str, allocation_result: dict | None = Non
     return "Allocation execute: no data available."
 
 
-async def _execute_replenishment(task_id: str, replenishment_result: dict | None = None) -> str:
+async def _execute_replenishment(task_id: str, replenishment_result: dict | None = None, proposal_id: str | None = None) -> str:
     """
     Day 6: Call the replenishment agent's /execute endpoint to insert
     purchase orders and update inventory stock levels after human approval.
@@ -325,7 +325,10 @@ async def _execute_replenishment(task_id: str, replenishment_result: dict | None
         # Try task-based execute first
         if task_id:
             try:
-                resp = await client.post(f"{REPLENISHMENT_AGENT_URL}/tasks/{task_id}/execute")
+                url = f"{REPLENISHMENT_AGENT_URL}/tasks/{task_id}/execute"
+                if proposal_id:
+                    url += f"?proposal_id={proposal_id}"
+                resp = await client.post(url)
                 if resp.status_code == 200:
                     return resp.json().get("message", "Replenishment executed.")
                 logger.warning(f"Replenishment task execute returned {resp.status_code} — falling back to direct execute")
@@ -340,7 +343,7 @@ async def _execute_replenishment(task_id: str, replenishment_result: dict | None
             try:
                 resp = await client.post(
                     f"{REPLENISHMENT_AGENT_URL}/execute-direct",
-                    json={"purchase_orders": pos}
+                    json={"purchase_orders": pos, "proposal_id": proposal_id}
                 )
                 resp.raise_for_status()
                 return resp.json().get("message", "Replenishment executed via direct payload.")
@@ -571,7 +574,7 @@ async def hitl_node(state: SupplyChainState, config: Optional[RunnableConfig] = 
             if replen_task_id or state.get("replenishment_result"):
                 if queue:
                     await queue.put({"event": "thought", "message": "Executing approved Purchase Order in DB..."})
-                msg = await _execute_replenishment(replen_task_id, state.get("replenishment_result"))
+                msg = await _execute_replenishment(replen_task_id, state.get("replenishment_result"), state.get("proposal_id"))
                 execution_messages.append(f"Replenishment: {msg}")
 
             if intent == "forecast_tuning" or state.get("proposed_tuning"):
@@ -649,7 +652,7 @@ async def hitl_node(state: SupplyChainState, config: Optional[RunnableConfig] = 
         if replen_task_id or state.get("replenishment_result"):
             if queue:
                 await queue.put({"event": "thought", "message": "Applying Purchase Order in database..."})
-            msg = await _execute_replenishment(replen_task_id, state.get("replenishment_result"))
+            msg = await _execute_replenishment(replen_task_id, state.get("replenishment_result"), state.get("proposal_id"))
             execution_messages.append(f"Replenishment: {msg}")
 
         if intent == "forecast_tuning" or state.get("proposed_tuning"):

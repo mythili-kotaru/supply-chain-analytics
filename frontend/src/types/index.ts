@@ -106,6 +106,7 @@ export interface PurchaseOrder {
   supplier_name: string;
   lead_time_days: number;
   expected_delivery: string;
+  jira_ticket_key?: string;
 }
 
 export interface AllocationTransfer {

@@ -127,7 +127,17 @@ export default function OrdersPage() {
                           </td>
                           <td className="px-6 py-4">
                             <p className="font-mono text-slate-300 font-semibold">{po.po_number}</p>
-                            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                            {po.jira_ticket_key && (
+                              <a
+                                href={`http://localhost:8003/api/dashboard/jira/browse/${po.jira_ticket_key}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-sky-400 hover:text-sky-300 hover:underline flex items-center gap-1 mt-1 font-mono w-max"
+                              >
+                                🎫 {po.jira_ticket_key}
+                              </a>
+                            )}
+                            <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
                               <ClockIcon className="w-3 h-3" />
                               ETA: {po.expected_delivery} ({po.lead_time_days} days)
                             </p>

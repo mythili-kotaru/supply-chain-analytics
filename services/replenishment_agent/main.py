@@ -276,6 +276,7 @@ class ExecuteDirectRequest(BaseModel):
     Used when the in-memory task store has been cleared (e.g. after service restart).
     """
     purchase_orders: list[dict]
+    proposal_id: str | None = None
 
 
 @app.post("/execute-direct")
@@ -284,11 +285,11 @@ async def execute_direct(req: ExecuteDirectRequest):
     Execute purchase orders passed directly in the request body.
     Called by the supervisor when the task_id is no longer in memory.
     """
-    return await _apply_purchase_orders(req.purchase_orders)
+    return await _apply_purchase_orders(req.purchase_orders, req.proposal_id)
 
 
 @app.post("/tasks/{task_id}/execute")
-async def execute_task(task_id: str):
+async def execute_task(task_id: str, proposal_id: str | None = None):
     """
     Persist approved purchase orders to the DB and update inventory levels.
     """
@@ -309,12 +310,12 @@ async def execute_task(task_id: str):
     if not purchase_orders:
         return {"executed": 0, "message": "No purchase orders to apply."}
 
-    execution_result = await _apply_purchase_orders(purchase_orders)
+    execution_result = await _apply_purchase_orders(purchase_orders, proposal_id)
     await db_update_task_status(db, task_id, "executed")
     return execution_result
 
 
-async def _apply_purchase_orders(purchase_orders: list) -> dict:
+async def _apply_purchase_orders(purchase_orders: list, proposal_id: str | None = None) -> dict:
     """
     Core DB logic: create purchase_orders table if needed, insert POs,
     and update inventory stock levels to max_capacity.
@@ -322,6 +323,11 @@ async def _apply_purchase_orders(purchase_orders: list) -> dict:
     """
     if not purchase_orders:
         return {"executed": 0, "message": "No purchase orders to apply."}
+
+    import httpx
+    jira_url = os.getenv("JIRA_API_URL")
+    if not jira_url:
+        jira_url = "http://dashboard_api:8003/api/dashboard/jira/mock-ticket"
 
     executed = 0
     errors = []
@@ -344,8 +350,14 @@ async def _apply_purchase_orders(purchase_orders: list) -> dict:
                 lead_time_days  INTEGER,
                 expected_delivery DATE,
                 status          TEXT DEFAULT 'approved',
-                created_at      TIMESTAMPTZ DEFAULT NOW()
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                jira_ticket_key TEXT
             )
+        """)
+
+        # Dynamically add jira_ticket_key column if not exists
+        await conn.execute("""
+            ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS jira_ticket_key TEXT;
         """)
 
         for po in purchase_orders:
@@ -356,6 +368,40 @@ async def _apply_purchase_orders(purchase_orders: list) -> dict:
                     from datetime import date as _date
                     expected_delivery = _date.fromisoformat(expected_delivery)
 
+                # Create Jira ticket for this PO
+                jira_ticket_key = None
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        po_summary = f"[Purchase Order] {po['po_number']} approved for {po['product_name']} ({po['product_id']}) @ {po['location']}"
+                        po_desc = (
+                            f"Purchase Order Details:\n"
+                            f"- PO Number: {po['po_number']}\n"
+                            f"- Product: {po['product_name']} ({po['product_id']})\n"
+                            f"- Location: {po['location']}\n"
+                            f"- Order Quantity: {po['order_quantity']} units\n"
+                            f"- Unit Price: ${po['unit_price']:.2f}\n"
+                            f"- Total Value: ${po['order_value']:.2f}\n"
+                            f"- Supplier: {po['supplier_name']} ({po['supplier_id']})\n"
+                            f"- Expected Delivery: {po['expected_delivery']}"
+                        )
+                        jira_payload = {
+                            "summary": po_summary,
+                            "description": po_desc,
+                            "project_key": "SC",
+                            "issue_type": "Task",
+                            "po_number": po["po_number"]
+                        }
+                        resp = await client.post(jira_url, json=jira_payload)
+                        if resp.status_code in (200, 201):
+                            resp_data = resp.json()
+                            jira_ticket_key = resp_data.get("key")
+                            po["jira_ticket_key"] = jira_ticket_key
+                            logger.info(f"Successfully created Jira ticket {jira_ticket_key} for PO {po['po_number']}")
+                        else:
+                            logger.warning(f"Jira ticket creation returned status {resp.status_code}: {resp.text}")
+                except Exception as jira_err:
+                    logger.error(f"Failed to create Jira ticket for PO {po['po_number']}: {jira_err}")
+
                 async with conn.transaction():
                     # Insert PO record
                     await conn.execute("""
@@ -363,14 +409,14 @@ async def _apply_purchase_orders(purchase_orders: list) -> dict:
                             po_number, product_id, product_name, location,
                             supplier_id, supplier_name, order_quantity,
                             unit_price, order_value, lead_time_days,
-                            expected_delivery, status
-                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved')
-                        ON CONFLICT (po_number) DO NOTHING
+                            expected_delivery, status, jira_ticket_key
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved',$12)
+                        ON CONFLICT (po_number) DO UPDATE SET jira_ticket_key = EXCLUDED.jira_ticket_key
                     """,
                         po["po_number"], po["product_id"], po["product_name"],
                         po["location"], po["supplier_id"], po["supplier_name"],
                         po["order_quantity"], po["unit_price"], po["order_value"],
-                        po["lead_time_days"], expected_delivery
+                        po["lead_time_days"], expected_delivery, jira_ticket_key
                     )
 
                     # Update inventory — fill to max_capacity
@@ -388,6 +434,28 @@ async def _apply_purchase_orders(purchase_orders: list) -> dict:
             except Exception as e:
                 errors.append(f"{po['po_number']}: {str(e)}")
                 logger.error(f"PO execution failed: {e}")
+
+        # If proposal_id is provided, sync the jira_ticket_key back to the proposals table
+        if proposal_id and executed > 0:
+            try:
+                row = await conn.fetchrow("SELECT replenishment_payload FROM proposals WHERE id = $1", proposal_id)
+                if row and row["replenishment_payload"]:
+                    payload = row["replenishment_payload"]
+                    if isinstance(payload, str):
+                        payload = json.loads(payload)
+                    po_list = payload.get("purchase_orders", [])
+                    for p_order in po_list:
+                        for po_exec in purchase_orders:
+                            if p_order.get("po_number") == po_exec.get("po_number") and po_exec.get("jira_ticket_key"):
+                                p_order["jira_ticket_key"] = po_exec["jira_ticket_key"]
+                    
+                    await conn.execute(
+                        "UPDATE proposals SET replenishment_payload = $1::jsonb WHERE id = $2",
+                        json.dumps(payload), proposal_id
+                    )
+                    logger.info(f"Synchronized Jira ticket keys back to proposals replenishment_payload for proposal {proposal_id}")
+            except Exception as sync_err:
+                logger.error(f"Failed to synchronize Jira ticket keys to proposals table: {sync_err}")
 
     return {
         "executed": executed,
