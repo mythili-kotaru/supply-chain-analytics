@@ -129,6 +129,13 @@ mcp.add_middleware(RBACMiddleware)
 # ─────────────────────────────────────────────
 app = mcp.http_app()
 
+from starlette.responses import JSONResponse
+
+async def health_check(request):
+    return JSONResponse({"status": "healthy"})
+
+app.add_route("/health", health_check)
+
 
 # ─────────────────────────────────────────────
 # TOOL 1: hybrid_search

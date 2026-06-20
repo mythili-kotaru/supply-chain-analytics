@@ -420,9 +420,12 @@ export function ProposalCard({ proposal, onApprove, onReject }: ProposalCardProp
                               href={`http://localhost:8003/api/dashboard/jira/browse/${po.jira_ticket_key}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-[10px] text-sky-400 hover:text-sky-300 hover:underline font-mono"
+                              className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-sky-950/40 border border-sky-800/50 hover:bg-sky-900/40 hover:border-sky-700/50 text-[9px] font-mono text-sky-400 hover:text-sky-300 transition-all shadow-sm group"
                             >
-                              🎫 {po.jira_ticket_key}
+                              <span className="w-1 h-1 rounded-full bg-sky-400 group-hover:scale-125 transition-transform animate-pulse"></span>
+                              <span className="font-semibold uppercase tracking-wider text-[8px] text-sky-500/80">Jira</span>
+                              <span className="text-slate-300 font-medium">{po.jira_ticket_key}</span>
+                              <ExternalLinkIcon className="w-2 h-2 opacity-60 group-hover:opacity-100 transition-opacity" />
                             </a>
                           )}
                         </span>

@@ -183,6 +183,7 @@ Rules:
   - Always include product_name in SELECT (not just product_id)
   - For stockout risk: WHERE stock_level < reorder_point
   - For MAPE analysis: ORDER BY mape DESC to find worst performers
+  - Note that MAPE is stored as a decimal fraction in the database (e.g. 0.20 represents 20%). If the query asks for a percentage value like '20%', use the decimal equivalent '0.20' in the SQL.
   - Date format: 'YYYY-MM-DD'
   - Use Postgres syntax
 """)
@@ -262,6 +263,7 @@ Rules:
   - Always include product_name in SELECT (not just product_id)
   - For stockout risk: WHERE stock_level < reorder_point
   - For MAPE analysis: ORDER BY mape DESC to find worst performers
+  - Note that MAPE is stored as a decimal fraction in the database (e.g. 0.20 represents 20%). If the query asks for a percentage value like '20%', use the decimal equivalent '0.20' in the SQL.
   - Date format: 'YYYY-MM-DD'
   - Use Postgres syntax
 """

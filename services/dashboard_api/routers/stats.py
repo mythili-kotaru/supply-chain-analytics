@@ -21,7 +21,7 @@ router = APIRouter()
 # Internal service URLs — same Docker network
 # We probe /health (or /agent-card for A2A services)
 SERVICES = {
-    "MCP Server":          "http://mcp_server:8000/docs",
+    "MCP Server":          "http://mcp_server:8000/health",
     "Allocation Agent":    "http://allocation_agent:8001/agent-card",
     "Replenishment Agent": "http://replenishment_agent:8002/agent-card",
     "LangGraph Agent":     "http://langgraph_agent:8004/health",   # Day 4

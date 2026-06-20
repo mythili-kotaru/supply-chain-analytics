@@ -4,13 +4,14 @@ import { useState, useEffect, useMemo } from "react";
 import { Navbar } from "@/components/Navbar";
 import { api } from "@/lib/api";
 import type { DashboardStats, Proposal } from "@/types";
-import { ShoppingCart, ArrowRightLeft, Truck, CheckCircle2, Clock } from "lucide-react";
+import { ShoppingCart, ArrowRightLeft, Truck, CheckCircle2, Clock, ExternalLink } from "lucide-react";
 
 const ShoppingCartIcon = ShoppingCart as any;
 const ArrowRightLeftIcon = ArrowRightLeft as any;
 const TruckIcon = Truck as any;
 const CheckCircle2Icon = CheckCircle2 as any;
 const ClockIcon = Clock as any;
+const ExternalLinkIcon = ExternalLink as any;
 
 const EMPTY_STATS: DashboardStats = {
   critical_alerts: 0,
@@ -132,9 +133,12 @@ export default function OrdersPage() {
                                 href={`http://localhost:8003/api/dashboard/jira/browse/${po.jira_ticket_key}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-xs text-sky-400 hover:text-sky-300 hover:underline flex items-center gap-1 mt-1 font-mono w-max"
+                                className="inline-flex items-center gap-1.5 px-2 py-0.5 mt-1.5 rounded bg-sky-950/40 border border-sky-800/50 hover:bg-sky-900/40 hover:border-sky-700/50 text-[10px] font-mono text-sky-400 hover:text-sky-300 transition-all shadow-sm w-max group"
                               >
-                                🎫 {po.jira_ticket_key}
+                                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 group-hover:scale-125 transition-transform animate-pulse"></span>
+                                <span className="font-semibold uppercase tracking-wider text-[9px] text-sky-500/80">Jira</span>
+                                <span className="text-slate-300 font-medium">{po.jira_ticket_key}</span>
+                                <ExternalLinkIcon className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100 transition-opacity ml-0.5" />
                               </a>
                             )}
                             <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
