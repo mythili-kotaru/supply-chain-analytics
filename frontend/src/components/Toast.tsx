@@ -8,12 +8,12 @@ type ToastType = "success" | "error" | "info";
 
 interface Toast {
   id: string;
-  message: string;
+  message: React.ReactNode;
   type: ToastType;
 }
 
 interface ToastContextType {
-  addToast: (message: string, type: ToastType) => void;
+  addToast: (message: React.ReactNode, type: ToastType) => void;
 }
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);

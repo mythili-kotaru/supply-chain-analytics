@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { Navbar } from "@/components/Navbar";
 import { api } from "@/lib/api";
 import type { DashboardStats, ForecastAlert, DriftRecord } from "@/types";
-import { LineChart, Settings2, AlertTriangle, TrendingUp, TrendingDown, Info } from "lucide-react";
+import { LineChart, Settings2, AlertTriangle, TrendingUp, TrendingDown, Info, Share2 } from "lucide-react";
+import { useToast } from "@/components/Toast";
 
 const LineChartIcon = LineChart as any;
 const Settings2Icon = Settings2 as any;
@@ -12,6 +13,7 @@ const AlertTriangleIcon = AlertTriangle as any;
 const TrendingUpIcon = TrendingUp as any;
 const TrendingDownIcon = TrendingDown as any;
 const InfoIcon = Info as any;
+const Share2Icon = Share2 as any;
 
 const EMPTY_STATS: DashboardStats = {
   critical_alerts: 0,
@@ -27,6 +29,36 @@ export default function ForecastingPage() {
   const [alerts, setAlerts] = useState<ForecastAlert[]>([]);
   const [drifts, setDrifts] = useState<DriftRecord[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const { addToast } = useToast();
+  const [publishing, setPublishing] = useState(false);
+
+  const handlePublishReport = async () => {
+    setPublishing(true);
+    try {
+      const res = await api.publishForecastReport();
+      addToast(
+        <div className="flex flex-col gap-1">
+          <span className="font-semibold text-emerald-400">Confluence Report Published!</span>
+          <span className="text-xs text-slate-300">Successfully published forecasting summary.</span>
+          <a
+            href={res.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-blue-400 hover:text-blue-300 underline font-semibold mt-1 flex items-center gap-1"
+          >
+            Open Confluence Page ({res.page_id}) →
+          </a>
+        </div>,
+        "success"
+      );
+    } catch (err: any) {
+      console.error(err);
+      addToast(`Failed to publish Confluence report: ${err.message || err}`, "error");
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([
@@ -72,6 +104,14 @@ export default function ForecastingPage() {
               <span className="text-sm text-fuchsia-400">Active Models:</span>
               <span className="text-lg font-bold text-fuchsia-400">10</span>
             </div>
+            <button
+              onClick={handlePublishReport}
+              disabled={publishing || loading}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 disabled:text-slate-400 text-white rounded-lg px-4 py-2.5 text-sm font-semibold flex items-center gap-2 border border-blue-500/30 hover:border-blue-500 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+            >
+              <Share2Icon className="w-4 h-4" />
+              {publishing ? "Publishing..." : "Publish to Confluence"}
+            </button>
           </div>
         </div>
 

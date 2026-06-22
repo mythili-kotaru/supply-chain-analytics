@@ -694,4 +694,91 @@ async def jira_browse_ticket(key: str):
     return ticket
 
 
+# ── Confluence Mock endpoints ───────────────────────────────────────────────────
+MOCK_CONFLUENCE_PAGES = []
+MOCK_CONFLUENCE_COUNTER = 200
+
+@slack_router.post("/confluence/mock-page")
+async def confluence_mock_page(req: dict):
+    global MOCK_CONFLUENCE_PAGES, MOCK_CONFLUENCE_COUNTER
+    from datetime import datetime
+    logger.info(f"Mock Confluence Page request received: {req}")
+    
+    title = req.get("title", "Untitled Page")
+    space_key = req.get("spaceKey", "OPS")
+    body = req.get("body", "")
+    
+    MOCK_CONFLUENCE_COUNTER += 1
+    page_id = f"CONF-{MOCK_CONFLUENCE_COUNTER}"
+    
+    page = {
+        "id": page_id,
+        "title": title,
+        "spaceKey": space_key,
+        "body": body,
+        "created_at": datetime.utcnow().isoformat(),
+        "url": f"http://localhost:8003/api/dashboard/confluence/browse/{page_id}"
+    }
+    
+    MOCK_CONFLUENCE_PAGES.append(page)
+    logger.info(f"Mock Confluence Page created: {page_id} - '{title}'")
+    return page
+
+@slack_router.get("/confluence/mock-page/last")
+async def get_last_confluence_page():
+    global MOCK_CONFLUENCE_PAGES
+    return MOCK_CONFLUENCE_PAGES[-1] if MOCK_CONFLUENCE_PAGES else {}
+
+@slack_router.get("/confluence/pages")
+async def get_all_confluence_pages():
+    global MOCK_CONFLUENCE_PAGES
+    return MOCK_CONFLUENCE_PAGES
+
+@slack_router.get("/confluence/browse/{id}")
+async def confluence_browse_page(id: str):
+    global MOCK_CONFLUENCE_PAGES
+    from fastapi.responses import HTMLResponse
+    page = next((p for p in MOCK_CONFLUENCE_PAGES if p["id"] == id), None)
+    if not page:
+        raise HTTPException(status_code=404, detail=f"Confluence page {id} not found")
+    
+    # Simple markdown-to-html conversion for display
+    formatted_body = page["body"]
+    import re
+    formatted_body = re.sub(r'# (.*?)\n', r'<h1 class="text-2xl font-bold text-slate-100 mt-6 mb-4 border-b border-slate-800 pb-2">\1</h1>\n', formatted_body)
+    formatted_body = re.sub(r'## (.*?)\n', r'<h2 class="text-xl font-semibold text-slate-200 mt-5 mb-3">\1</h2>\n', formatted_body)
+    formatted_body = re.sub(r'### (.*?)\n', r'<h3 class="text-lg font-medium text-slate-300 mt-4 mb-2">\1</h3>\n', formatted_body)
+    formatted_body = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', formatted_body)
+    formatted_body = re.sub(r'\*(.*?)\*', r'<em>\1</em>', formatted_body)
+    formatted_body = re.sub(r'- (.*?)\n', r'<li class="ml-4 list-disc text-slate-300">\1</li>\n', formatted_body)
+    formatted_body = re.sub(r'  - (.*?)\n', r'<li class="ml-8 list-circle text-slate-400">\1</li>\n', formatted_body)
+    formatted_body = formatted_body.replace('\n', '<br>')
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>{page["title"]}</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-slate-950 text-slate-100 p-8 font-sans max-w-4xl mx-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
+        <div class="flex items-center gap-3">
+          <div class="bg-blue-600 px-3 py-1 rounded text-xs font-bold uppercase tracking-wider text-white">Confluence</div>
+          <span class="text-slate-400 text-sm">Space: {page["spaceKey"]}</span>
+        </div>
+        <span class="text-xs text-slate-500">ID: {page["id"]} | Created: {page["created_at"][:10]}</span>
+      </div>
+      <h1 class="text-3xl font-bold tracking-tight text-white mb-6">{page["title"]}</h1>
+      <div class="prose prose-invert max-w-none text-slate-300 space-y-4">
+        {formatted_body}
+      </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
+
+
+
 

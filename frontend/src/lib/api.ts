@@ -136,6 +136,11 @@ export const api = {
       body: JSON.stringify({ query }),
     }),
 
+  publishForecastReport: () =>
+    apiFetch<{ status: string; page_id: string; title: string; url: string }>("/forecast/confluence-report", {
+      method: "POST",
+    }),
+
   // ── Charts ──────────────────────────────────────────────────────────────────
 
   getInventoryHealthChart: () =>

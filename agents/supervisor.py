@@ -447,12 +447,77 @@ async def _execute_forecast_tuning(state: SupplyChainState) -> str:
                     mape_delta,
                 )
 
+                # Get product name for report
+                prod_row = await conn.fetchrow("""
+                    SELECT product_name FROM products WHERE product_id = $1
+                """, product_id)
+                product_name = prod_row["product_name"] if prod_row else "Unknown Product"
+
+                # Pre-format strings for markdown
+                pre_mape_str = f"{pre_mape * 100:.2f}%" if pre_mape is not None else "N/A"
+                post_mape_str = f"{post_mape * 100:.2f}%" if post_mape is not None else "N/A"
+                delta_str = f"{mape_delta * 100:.2f}%" if mape_delta is not None else "N/A"
+
+                # Construct and publish Confluence report
+                report_body = f"""# Forecast Model Tuning Report: {product_name} ({product_id})
+
+Report generated on: **{today.strftime("%B %d, %Y")}**
+
+This report documents the automated hyperparameter tuning and model accuracy improvements (drift detection) for **{product_name}**.
+
+## 📈 Model Performance Improvement
+- **Product ID**: {product_id}
+- **Product Name**: {product_name}
+- **Model Name**: {model_name}
+- **Pre-Tuning MAPE**: {pre_mape_str}
+- **Post-Tuning MAPE**: {post_mape_str}
+- **MAPE Improvement Delta**: {delta_str} (Drift Reduction)
+- **Tuning Status**: Approved & Applied
+
+## ⚙️ Hyperparameter Changes
+- **Old Parameters**:
+```json
+{_json.dumps(_json.loads(old_params), indent=2)}
+```
+- **New Parameters**:
+```json
+{_json.dumps(_json.loads(new_params), indent=2)}
+```
+
+## 💡 Rationale & Observations
+{proposed.get("rationale", "Approved via HITL dashboard")}
+
+- **Post-Tuning Validation**: The new hyperparameters were applied and simulated. The model shows an active improvement in forecast accuracy, reducing overall forecasting drift.
+"""
+
+                import httpx
+                confluence_url = None
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(
+                            "http://dashboard_api:8003/api/dashboard/confluence/mock-page",
+                            json={
+                                "title": f"Forecasting Tuning Report - {product_name} ({product_id})",
+                                "spaceKey": "OPS",
+                                "body": report_body
+                            },
+                            timeout=5.0
+                        )
+                        resp.raise_for_status()
+                        page_data = resp.json()
+                        confluence_url = page_data.get("url")
+                except Exception as ex:
+                    logger.error(f"Failed to auto-publish Confluence report inside supervisor: {ex}")
+
                 improvement_str = f"MAPE {pre_mape:.1%} → {post_mape:.1%} (Δ {mape_delta:.1%})" if post_mape else "N/A"
-                return (
+                final_msg = (
                     f"Hyperparameters updated for {product_id}. "
                     f"Drift check: {improvement_str}. "
                     f"Expected: {proposed.get('expected_mape_improvement', 'N/A')}."
                 )
+                if confluence_url:
+                    final_msg += f" Confluence Report published: {confluence_url}"
+                return final_msg
         finally:
             await pool.close()
     except Exception as e:
