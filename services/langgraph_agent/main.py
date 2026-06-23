@@ -1030,6 +1030,188 @@ async def resume_graph_stream(req: ResumeRequest):
     )
 
 
+class ChatRequest(BaseModel):
+    query: str
+    thread_id: Optional[str] = None
+    user_role: str = "analyst"
+
+
+async def chat_stream_generator(req: ChatRequest, thread_id: str):
+    queue = asyncio.Queue()
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "stream_queue": queue,
+        }
+    }
+    
+    async def run_graph():
+        try:
+            async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
+                app = build_supervisor_graph(checkpointer=checkpointer, interrupt_before_list=[])
+                
+                # Check if thread has state (is continuation)
+                state_snapshot = await app.aget_state(config)
+                is_continuation = state_snapshot.values != {}
+                
+                nodes_visited = []
+                last_ai_message = "I am processing your query."
+                proposed_tuning = None
+                replenishment_result = None
+                allocation_result = None
+                
+                if is_continuation:
+                    is_paused = len(state_snapshot.next) > 0
+                    
+                    if is_paused:
+                        query_lower = req.query.lower().strip()
+                        is_approval = any(w in query_lower for w in ["approve", "yes", "go ahead", "confirm", "execute", "ok"])
+                        is_rejection = any(w in query_lower for w in ["reject", "no", "cancel", "deny"])
+                        
+                        if is_approval or is_rejection:
+                            approved = is_approval
+                            action_verb = "APPROVED" if approved else "REJECTED"
+                            await queue.put({"event": "thought", "message": f"Resuming workflow with decision: {action_verb}..."})
+                            resume_payload = {
+                                "approved": approved,
+                                "feedback": f"Resumed via Chat: {req.query}",
+                                "user_role": req.user_role,
+                            }
+                            event_stream = app.astream(Command(resume=resume_payload), config=config, stream_mode="updates")
+                        else:
+                            await queue.put({"event": "thought", "message": "Cancelling pending proposal to answer your question..."})
+                            resume_payload = {
+                                "approved": False,
+                                "feedback": "User asked a follow-up question instead of deciding.",
+                                "user_role": req.user_role,
+                            }
+                            # Resuming with False to abort and clear checkpoint
+                            async for _ in app.astream(Command(resume=resume_payload), config=config, stream_mode="updates"):
+                                pass
+                                
+                            # Start a new run with the user query
+                            await queue.put({"event": "thought", "message": "Processing follow-up question..."})
+                            new_input = {
+                                "user_query": req.query,
+                                "messages": [HumanMessage(content=req.query)],
+                                "next_action": None,
+                                "proposed_tuning": None,
+                                "allocation_result": None,
+                                "replenishment_result": None,
+                                "supplier_config_payload": None,
+                                "human_approved": None,
+                            }
+                            event_stream = app.astream(new_input, config=config, stream_mode="updates")
+                    else:
+                        await queue.put({"event": "thought", "message": f"Continuing conversation in thread {thread_id}..."})
+                        new_input = {
+                            "user_query": req.query,
+                            "messages": [HumanMessage(content=req.query)],
+                            "next_action": None,
+                            "proposed_tuning": None,
+                            "allocation_result": None,
+                            "replenishment_result": None,
+                            "supplier_config_payload": None,
+                            "human_approved": None,
+                        }
+                        event_stream = app.astream(new_input, config=config, stream_mode="updates")
+                else:
+                    await queue.put({"event": "thought", "message": "Starting new chat conversation..."})
+                    initial_state = {
+                        "user_query": req.query,
+                        "user_role": req.user_role,
+                        "session_id": thread_id,
+                        "messages": [HumanMessage(content=req.query)],
+                        "human_approved": None,
+                        "tuning_iterations": 0,
+                        "error": None,
+                    }
+                    event_stream = app.astream(initial_state, config=config, stream_mode="updates")
+                    
+                async for event in event_stream:
+                    for node_name, node_output in event.items():
+                        if node_name == "__interrupt__":
+                            logger.info(f"Chat graph paused at interrupt for thread {thread_id}")
+                            break
+                        nodes_visited.append(node_name)
+                        logger.info(f"Node completed: {node_name}")
+                        await queue.put({
+                            "event": "node_complete",
+                            "node": node_name,
+                            "nodes_visited": list(nodes_visited)
+                        })
+                        
+                        msgs = node_output.get("messages", [])
+                        for msg in reversed(msgs):
+                            if isinstance(msg, AIMessage) and msg.content:
+                                last_ai_message = msg.content
+                                await queue.put({
+                                    "event": "thought",
+                                    "message": f"[{node_name}] {msg.content[:150]}..."
+                                })
+                                break
+                                
+                        if node_output.get("proposed_tuning"):
+                            proposed_tuning = node_output["proposed_tuning"]
+                        if node_output.get("replenishment_result"):
+                            replenishment_result = node_output["replenishment_result"]
+                        if node_output.get("allocation_result"):
+                            allocation_result = node_output["allocation_result"]
+                
+                # Check if it paused at hitl or completed
+                state_after = await app.aget_state(config)
+                paused = len(state_after.next) > 0
+                
+                if paused:
+                    await queue.put({
+                        "event": "complete",
+                        "thread_id": thread_id,
+                        "status": "paused_at_hitl",
+                        "nodes_visited": nodes_visited,
+                        "agent_summary": last_ai_message,
+                        "proposed_tuning": proposed_tuning,
+                        "allocation_result": allocation_result,
+                        "replenishment_result": replenishment_result,
+                    })
+                else:
+                    await queue.put({
+                        "event": "complete",
+                        "thread_id": thread_id,
+                        "status": "completed",
+                        "nodes_visited": nodes_visited,
+                        "agent_summary": last_ai_message,
+                    })
+        except Exception as e:
+            logger.error(f"Chat stream graph error: {e}", exc_info=True)
+            await queue.put({"event": "error", "message": f"Chat graph error: {str(e)}"})
+
+    graph_task = asyncio.create_task(run_graph())
+    
+    while True:
+        try:
+            item = await queue.get()
+            yield f"data: {json.dumps(item)}\n\n"
+            if item.get("event") in ("complete", "error"):
+                break
+        except asyncio.CancelledError:
+            logger.info("Chat stream request cancelled. Cancelling background graph task...")
+            graph_task.cancel()
+            raise
+
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest):
+    """
+    Submit a chat message to the supervisor graph and stream intermediate execution steps and final summary as SSE.
+    """
+    logger.info(f"Chat stream: query='{req.query}' thread={req.thread_id}")
+    thread_id = req.thread_id or str(uuid.uuid4())
+    return StreamingResponse(
+        chat_stream_generator(req, thread_id),
+        media_type="text/event-stream"
+    )
+
+
 @app.get("/threads/{thread_id}/state")
 async def get_thread_state(thread_id: str):
     """

@@ -669,6 +669,23 @@ async def hitl_node(state: SupplyChainState, config: Optional[RunnableConfig] = 
                 "messages": [AIMessage(content=f"Action rejected. Reason: {state.get('human_feedback', 'No reason given')}.")]
             }
 
+    # Bypass interrupt if there are no proposed actions/proposals to execute
+    has_proposals = (
+        state.get("proposed_tuning") is not None or
+        state.get("allocation_result") is not None or
+        state.get("replenishment_result") is not None or
+        state.get("supplier_config_payload") is not None or
+        state.get("allocation_task_id") is not None or
+        state.get("replenishment_task_id") is not None
+    )
+    if not has_proposals:
+        if queue:
+            await queue.put({"event": "thought", "message": "No action proposals generated. Ending supervisor graph flow."})
+        return {
+            "next_action": "done",
+            "messages": [AIMessage(content=state.get("formatted_insight") or "Task completed successfully without pending approvals.")]
+        }
+
     # Prepare the approval request payload — shown to the human
     approval_request = {
         "pending_action": state.get("next_action"),
@@ -787,7 +804,7 @@ def route_after_hitl(state: SupplyChainState) -> str:
 # ─────────────────────────────────────────────
 # BUILD THE GRAPH
 # ─────────────────────────────────────────────
-def build_supervisor_graph(checkpointer=None):
+def build_supervisor_graph(checkpointer=None, interrupt_before_list=None):
     """
     Construct and compile the supervisor StateGraph.
 
@@ -798,10 +815,15 @@ def build_supervisor_graph(checkpointer=None):
     Args:
         checkpointer: A LangGraph checkpointer (e.g., SqliteSaver).
                       If None, graph runs without persistence.
+        interrupt_before_list: List of nodes to interrupt before.
+                               Defaults to ["hitl"] if not provided.
 
     Returns:
         Compiled LangGraph app (callable)
     """
+    if interrupt_before_list is None:
+        interrupt_before_list = ["hitl"]
+
     graph = StateGraph(SupplyChainState)
 
     # Add all nodes
@@ -834,12 +856,13 @@ def build_supervisor_graph(checkpointer=None):
     # After HITL, end
     graph.add_edge("hitl", END)
 
-    return graph.compile(
-        checkpointer=checkpointer,
-        interrupt_before=["hitl"]   # LangGraph will auto-interrupt BEFORE hitl node runs
-                                    # This means we pause before showing results to human,
-                                    # giving them a chance to review the intermediate state
-    )
+    # If interrupt_before_list contains elements, compile with those interrupts.
+    # Otherwise, compile without interrupts.
+    compile_kwargs = {"checkpointer": checkpointer}
+    if interrupt_before_list:
+        compile_kwargs["interrupt_before"] = interrupt_before_list
+
+    return graph.compile(**compile_kwargs)
 
 
 # ─────────────────────────────────────────────

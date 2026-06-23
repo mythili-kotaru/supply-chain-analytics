@@ -5,18 +5,20 @@ import Link from "next/link";
 const LinkComponent = Link as any;
 
 import { usePathname } from "next/navigation";
-import { Activity, Bell, ChevronDown, Zap } from "lucide-react";
+import { Activity, Bell, ChevronDown, Zap, Sparkles } from "lucide-react";
 
 const ActivityIcon = Activity as any;
 const BellIcon = Bell as any;
 const ChevronDownIcon = ChevronDown as any;
 const ZapIcon = Zap as any;
+const SparklesIcon = Sparkles as any;
 
 import type { DashboardStats } from "@/types";
 import { UserProfilePanel } from "@/components/UserProfilePanel";
 
 interface NavbarProps {
   stats: DashboardStats;
+  onToggleCoPilot: () => void;
 }
 
 const NAV_ITEMS = [
@@ -28,7 +30,7 @@ const NAV_ITEMS = [
   { name: "Observability", href: "/observability" },
 ];
 
-export function Navbar({ stats }: NavbarProps) {
+export function Navbar({ stats, onToggleCoPilot }: NavbarProps) {
   const allHealthy = stats.services.every((s) => s.status === "healthy");
   const pathname = usePathname();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -102,6 +104,15 @@ export function Navbar({ stats }: NavbarProps) {
         <ActivityIcon className="w-3 h-3" />
         <span className="font-medium">{allHealthy ? "All systems operational" : "Degraded"}</span>
       </div>
+
+      {/* Co-Pilot toggle button */}
+      <button 
+        onClick={onToggleCoPilot}
+        className="p-1.5 px-3 rounded-lg hover:bg-slate-800/80 transition-colors flex items-center gap-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-blue-400 text-xs font-semibold mr-1 shadow-md shadow-blue-500/5"
+      >
+        <SparklesIcon className="w-3.5 h-3.5 animate-pulse" />
+        <span className="hidden sm:inline">Co-Pilot</span>
+      </button>
 
       {/* Pending approvals badge */}
       <button className="relative p-2 rounded-lg hover:bg-slate-800 transition-colors">

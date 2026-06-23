@@ -268,4 +268,66 @@ export const api = {
 
     return finalResult;
   },
+
+  streamChat: async (
+    query: string,
+    threadId: string | null,
+    onEvent: (event: any) => void
+  ): Promise<any> => {
+    const role = getRole();
+    const token = getToken();
+    const headers = new Headers();
+    headers.set("Content-Type", "application/json");
+    headers.set("x-role", role);
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    const response = await fetch(`${BASE}/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ query, thread_id: threadId }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Chat stream error ${response.status}: ${body}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No readable stream in response");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult = null;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data: ")) {
+            const dataStr = trimmed.slice(6);
+            try {
+              const event = JSON.parse(dataStr);
+              onEvent(event);
+              if (event.event === "complete") {
+                finalResult = event;
+              }
+            } catch (e) {
+              console.error("Failed to parse stream event", dataStr, e);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    return finalResult;
+  },
 };

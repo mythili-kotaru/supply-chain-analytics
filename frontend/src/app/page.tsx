@@ -20,6 +20,7 @@ const SearchIcon = Search as any;
 const Loader2Icon = Loader2 as any;
 
 import { LoginPanel } from "@/components/LoginPanel";
+import { CoPilotChat } from "@/components/CoPilotChat";
 
 // ─────────────────────────────────────────────
 // Day 2: All mock data replaced with real API calls.
@@ -51,6 +52,15 @@ const EMPTY_STATS: DashboardStats = {
 
 export default function DashboardPage() {
   const [token, setToken] = useState<string | null>(null);
+  const [coPilotOpen, setCoPilotOpen] = useState(false);
+  const [userRole, setUserRole] = useState("analyst");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const storedRole = localStorage.getItem("scai_user_role");
+      if (storedRole) setUserRole(storedRole);
+    }
+  }, [coPilotOpen]);
   const [loadingToken, setLoadingToken] = useState(true);
 
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -204,7 +214,7 @@ export default function DashboardPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col">
-        <Navbar stats={EMPTY_STATS} />
+        <Navbar stats={EMPTY_STATS} onToggleCoPilot={() => setCoPilotOpen((v) => !v)} />
         <div className="flex-1 flex items-center justify-center">
           <div className="card p-8 max-w-md text-center space-y-3">
             <p className="text-red-400 font-semibold text-sm">Connection Error</p>
@@ -229,7 +239,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col">
-        <Navbar stats={EMPTY_STATS} />
+        <Navbar stats={EMPTY_STATS} onToggleCoPilot={() => setCoPilotOpen((v) => !v)} />
         <main className="flex-1 p-4 md:p-6 max-w-[1600px] mx-auto w-full space-y-4">
           <div className="flex flex-col lg:flex-row gap-4">
             <div className="skeleton h-24 w-full" />
@@ -251,7 +261,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
-      <Navbar stats={stats} />
+      <Navbar stats={stats} onToggleCoPilot={() => setCoPilotOpen((v) => !v)} />
 
       <main className="flex-1 p-4 md:p-6 max-w-[1600px] mx-auto w-full space-y-4">
 
@@ -369,6 +379,7 @@ export default function DashboardPage() {
         </div>
 
       </main>
+      <CoPilotChat isOpen={coPilotOpen} onClose={() => setCoPilotOpen(false)} userRole={userRole} />
     </div>
   );
 }

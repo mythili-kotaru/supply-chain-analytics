@@ -780,5 +780,43 @@ async def confluence_browse_page(id: str):
     return HTMLResponse(content=html_content, status_code=200)
 
 
+from pydantic import BaseModel
+
+class ChatRequest(BaseModel):
+    query: str
+    thread_id: Optional[str] = None
+
+@router.post("/chat/stream")
+async def chat_stream_endpoint(
+    req: ChatRequest,
+    role: str = Depends(get_current_role)
+):
+    """
+    Proxy a chat query to the langgraph_agent and stream intermediate execution steps as SSE.
+    """
+    async def stream_generator():
+        payload = {
+            "query": req.query,
+            "thread_id": req.thread_id,
+            "user_role": role
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream("POST", f"{LANGGRAPH_AGENT_URL}/chat/stream", json=payload) as response:
+                    if response.status_code == 200:
+                        async for line in response.aiter_lines():
+                            yield line + "\n"
+                    else:
+                        err_body = await response.aread()
+                        logger.error(f"langgraph_agent chat stream returned status {response.status_code}: {err_body.decode()}")
+                        yield f"data: {json.dumps({'event': 'error', 'message': f'Agent service error: {response.status_code}'})}\n\n"
+        except Exception as e:
+            logger.error(f"Error calling langgraph_agent chat/stream: {e}")
+            yield f"data: {json.dumps({'event': 'error', 'message': f'Agent service offline: {type(e).__name__}'})}\n\n"
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+
+
 
 
