@@ -198,6 +198,40 @@ services:
       - langgraph_checkpoints:/tmp        # persist SQLite checkpoint DB across restarts
       - .:/Users/mythilikotaru/Documents/supply-chain-ai
 
+  # ─────────────────────────────────────────────
+  # CENTRALIZED LOGGING & OBSERVABILITY
+  # ─────────────────────────────────────────────
+  loki:
+    image: grafana/loki:2.9.2
+    container_name: supply_chain_loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:2.9.2
+    container_name: supply_chain_promtail
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: supply_chain_grafana
+    ports:
+      - "3200:3000"
+    environment:
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - loki
+
 volumes:
   pgdata:
     # named volume — Docker manages this, survives `docker-compose down`

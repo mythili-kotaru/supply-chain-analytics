@@ -25,6 +25,7 @@ const NAV_ITEMS = [
   { name: "Forecasting", href: "/forecasting" },
   { name: "Orders", href: "/orders" },
   { name: "Analytics", href: "/analytics" },
+  { name: "Observability", href: "/observability" },
 ];
 
 export function Navbar({ stats }: NavbarProps) {
