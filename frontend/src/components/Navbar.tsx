@@ -28,6 +28,7 @@ const NAV_ITEMS = [
   { name: "Orders", href: "/orders" },
   { name: "Analytics", href: "/analytics" },
   { name: "Sourcing", href: "/sourcing" },
+  { name: "Sandbox", href: "/sandbox" },
   { name: "Observability", href: "/observability" },
 ];
 

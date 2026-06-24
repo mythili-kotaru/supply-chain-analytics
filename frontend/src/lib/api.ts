@@ -20,6 +20,8 @@ import type {
   AnomalyEvent,
   SupplierModel,
   SupplierScorecardItem,
+  SimulationParams,
+  SimulationResponse,
 } from "@/types";
 
 // In Next.js, /api/... routes are always relative to the current origin
@@ -149,6 +151,14 @@ export const api = {
 
   getSupplierScorecard: (supplierId: string) =>
     apiFetch<SupplierScorecardItem>(`/sourcing/scorecard/${supplierId}`),
+
+  // ── Simulation / Scenario Sandbox (Day 11) ─────────────────────────────────
+
+  runSimulation: (params: SimulationParams) =>
+    apiFetch<SimulationResponse>("/simulation/run", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
 
   // ── Charts ──────────────────────────────────────────────────────────────────
 

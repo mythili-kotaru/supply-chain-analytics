@@ -220,3 +220,61 @@ export interface SupplierScorecardItem {
   on_time_delivery_pct: number | null;
   risk_score: number;
 }
+
+// ─── Simulation / Scenario Sandbox (Day 11) ───────────────────────────
+
+export interface SimulationParams {
+  demand_multiplier: number;
+  lead_time_multiplier: number;
+  disrupted_supplier_id: string | null;
+}
+
+export interface SimulationSummary {
+  base_lost_revenue: number;
+  simulated_lost_revenue: number;
+  revenue_impact: number;
+  base_stockouts: number;
+  simulated_stockouts: number;
+}
+
+export interface TimelinePoint {
+  day: number;
+  base_stock: number;
+  simulated_stock: number;
+}
+
+export interface ChartData {
+  product_id: string;
+  product_name: string;
+  location: string;
+  timeline: TimelinePoint[];
+}
+
+export interface StockoutDetail {
+  product_id: string;
+  product_name: string;
+  location: string;
+  base_days_to_stockout: number;
+  simulated_days_to_stockout: number;
+  base_lost_revenue: number;
+  simulated_lost_revenue: number;
+}
+
+export interface MitigationAction {
+  product_id: string;
+  product_name: string;
+  location: string;
+  action_type: "transfer" | "purchase_order" | string;
+  details: string;
+  quantity: number;
+  source_location?: string | null;
+  supplier_name?: string | null;
+}
+
+export interface SimulationResponse {
+  summary: SimulationSummary;
+  charts: ChartData[];
+  stockout_details: StockoutDetail[];
+  mitigations: MitigationAction[];
+}
+
