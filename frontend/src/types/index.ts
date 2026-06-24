@@ -107,6 +107,7 @@ export interface PurchaseOrder {
   lead_time_days: number;
   expected_delivery: string;
   jira_ticket_key?: string;
+  notes?: string;
 }
 
 export interface AllocationTransfer {
@@ -203,4 +204,19 @@ export interface SupplierModel {
   location: string;
   lead_time_days: number;
   defect_rate: number;
+}
+
+export interface SupplierScorecardItem {
+  supplier_id: string;
+  supplier_name: string;
+  location: string | null;
+  default_lead_time: number;
+  declared_defect_rate: number;
+  total_orders: number;
+  avg_delivery_days: number | null;
+  avg_lead_time_drift: number | null;
+  avg_unit_manufacturing_cost: number | null;
+  avg_unit_shipping_cost: number | null;
+  on_time_delivery_pct: number | null;
+  risk_score: number;
 }

@@ -155,11 +155,13 @@ export function CoPilotChat({ isOpen, onClose, userRole }: CoPilotChatProps) {
           error: true,
         },
       ]);
-      addToast({
-        title: "Chat Error",
-        message: err.message || "Failed to communicate with supervisor agent.",
-        type: "error",
-      });
+      addToast(
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-red-400">Chat Error</span>
+          <span className="text-xs text-slate-300">{err.message || "Failed to communicate with supervisor agent."}</span>
+        </div>,
+        "error"
+      );
     } finally {
       setLoading(false);
       setActiveThoughts([]);
@@ -169,11 +171,13 @@ export function CoPilotChat({ isOpen, onClose, userRole }: CoPilotChatProps) {
 
   const handleInlineAction = async (msgId: string, approved: boolean) => {
     if (userRole !== "admin") {
-      addToast({
-        title: "Access Denied",
-        message: "Only administrator role can approve proposals.",
-        type: "error",
-      });
+      addToast(
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-red-400">Access Denied</span>
+          <span className="text-xs text-slate-300 font-normal">Only administrator role can approve proposals.</span>
+        </div>,
+        "error"
+      );
       return;
     }
 
@@ -191,13 +195,19 @@ export function CoPilotChat({ isOpen, onClose, userRole }: CoPilotChatProps) {
       )
     );
 
-    addToast({
-      title: approved ? "Proposal Approved" : "Proposal Rejected",
-      message: approved
-        ? "Resuming supervisor workflow to write database changes..."
-        : "Proposal rejected successfully.",
-      type: approved ? "success" : "info",
-    });
+    addToast(
+      <div className="flex flex-col gap-0.5">
+        <span className={approved ? "font-semibold text-emerald-400" : "font-semibold text-slate-300"}>
+          {approved ? "Proposal Approved" : "Proposal Rejected"}
+        </span>
+        <span className="text-xs text-slate-300 font-normal">
+          {approved
+            ? "Resuming supervisor workflow to write database changes..."
+            : "Proposal rejected successfully."}
+        </span>
+      </div>,
+      approved ? "success" : "info"
+    );
 
     if (approved && threadId) {
       setLoading(true);
@@ -219,11 +229,13 @@ export function CoPilotChat({ isOpen, onClose, userRole }: CoPilotChatProps) {
           },
         ]);
       } catch (err: any) {
-        addToast({
-          title: "Execution Error",
-          message: err.message || "Failed to execute changes.",
-          type: "error",
-        });
+        addToast(
+          <div className="flex flex-col gap-0.5">
+            <span className="font-semibold text-red-400">Execution Error</span>
+            <span className="text-xs text-slate-300">{err.message || "Failed to execute changes."}</span>
+          </div>,
+          "error"
+        );
       } finally {
         setLoading(false);
         setActiveThoughts([]);

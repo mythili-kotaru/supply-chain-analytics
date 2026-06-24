@@ -19,6 +19,7 @@ import type {
   DriftHistory,
   AnomalyEvent,
   SupplierModel,
+  SupplierScorecardItem,
 } from "@/types";
 
 // In Next.js, /api/... routes are always relative to the current origin
@@ -140,6 +141,14 @@ export const api = {
     apiFetch<{ status: string; page_id: string; title: string; url: string }>("/forecast/confluence-report", {
       method: "POST",
     }),
+
+  // ── Sourcing & Supplier Scorecard ───────────────────────────────────────────
+
+  getSourcingScorecard: () =>
+    apiFetch<SupplierScorecardItem[]>("/sourcing/scorecard"),
+
+  getSupplierScorecard: (supplierId: string) =>
+    apiFetch<SupplierScorecardItem>(`/sourcing/scorecard/${supplierId}`),
 
   // ── Charts ──────────────────────────────────────────────────────────────────
 

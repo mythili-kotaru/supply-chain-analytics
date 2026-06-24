@@ -18,7 +18,7 @@ import { UserProfilePanel } from "@/components/UserProfilePanel";
 
 interface NavbarProps {
   stats: DashboardStats;
-  onToggleCoPilot: () => void;
+  onToggleCoPilot?: () => void;
 }
 
 const NAV_ITEMS = [
@@ -27,6 +27,7 @@ const NAV_ITEMS = [
   { name: "Forecasting", href: "/forecasting" },
   { name: "Orders", href: "/orders" },
   { name: "Analytics", href: "/analytics" },
+  { name: "Sourcing", href: "/sourcing" },
   { name: "Observability", href: "/observability" },
 ];
 
@@ -106,13 +107,15 @@ export function Navbar({ stats, onToggleCoPilot }: NavbarProps) {
       </div>
 
       {/* Co-Pilot toggle button */}
-      <button 
-        onClick={onToggleCoPilot}
-        className="p-1.5 px-3 rounded-lg hover:bg-slate-800/80 transition-colors flex items-center gap-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-blue-400 text-xs font-semibold mr-1 shadow-md shadow-blue-500/5"
-      >
-        <SparklesIcon className="w-3.5 h-3.5 animate-pulse" />
-        <span className="hidden sm:inline">Co-Pilot</span>
-      </button>
+      {onToggleCoPilot && (
+        <button 
+          onClick={onToggleCoPilot}
+          className="p-1.5 px-3 rounded-lg hover:bg-slate-800/80 transition-colors flex items-center gap-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-blue-400 text-xs font-semibold mr-1 shadow-md shadow-blue-500/5"
+        >
+          <SparklesIcon className="w-3.5 h-3.5 animate-pulse" />
+          <span className="hidden sm:inline">Co-Pilot</span>
+        </button>
+      )}
 
       {/* Pending approvals badge */}
       <button className="relative p-2 rounded-lg hover:bg-slate-800 transition-colors">

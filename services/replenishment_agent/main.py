@@ -197,20 +197,59 @@ async def compute_replenishment(task_id: str, product_id: str | None):
                 ORDER BY (i.reorder_point - i.stock_level) DESC
             """, *params)
 
-            # Get best supplier per product (lowest lead time, then lowest defect rate)
-            suppliers = await conn.fetch("""
-                SELECT supplier_id, supplier_name, location, lead_time_days, defect_rate
-                FROM suppliers
-                ORDER BY lead_time_days ASC, defect_rate ASC
+            # Get supplier scorecard stats from historical transactions
+            scorecard_rows = await conn.fetch("""
+                SELECT
+                    s.supplier_id,
+                    s.supplier_name,
+                    s.location,
+                    s.lead_time_days AS default_lead_time,
+                    s.defect_rate AS declared_defect_rate,
+                    COUNT(scr.record_id) AS total_orders,
+                    ROUND(AVG(scr.delivery_date - scr.order_date), 1) AS avg_delivery_days,
+                    ROUND(AVG((scr.delivery_date - scr.order_date) - s.lead_time_days), 1) AS avg_lead_time_drift,
+                    ROUND(
+                        (COUNT(CASE WHEN (scr.delivery_date - scr.order_date) <= s.lead_time_days THEN 1 END)::numeric / 
+                         NULLIF(COUNT(scr.record_id), 0)) * 100,
+                        1
+                    ) AS on_time_delivery_pct
+                FROM suppliers s
+                LEFT JOIN supply_chain_records scr ON s.supplier_id = scr.supplier_id
+                GROUP BY s.supplier_id, s.supplier_name, s.lead_time_days, s.defect_rate, s.location
             """)
 
-        best_supplier = dict(suppliers[0]) if suppliers else {
-            "supplier_id": "SUP-001",
-            "supplier_name": "Default Supplier",
-            "location": "Unknown",
-            "lead_time_days": 14,
-            "defect_rate": 0.02
-        }
+        # Process scorecards and calculate risk scores
+        scorecard = []
+        for r in scorecard_rows:
+            on_time = float(r["on_time_delivery_pct"]) if r["on_time_delivery_pct"] is not None else 100.0
+            drift = float(r["avg_lead_time_drift"]) if r["avg_lead_time_drift"] is not None else 0.0
+            defect = float(r["declared_defect_rate"])
+            
+            defect_risk = min((defect / 0.05) * 30.0, 30.0)
+            on_time_risk = ((100.0 - on_time) / 100.0) * 50.0
+            drift_risk = max(min((drift / 5.0) * 20.0, 20.0), 0.0)
+            risk_score = defect_risk + on_time_risk + drift_risk
+            
+            scorecard.append({
+                "supplier_id": r["supplier_id"],
+                "supplier_name": r["supplier_name"],
+                "location": r["location"],
+                "lead_time_days": r["default_lead_time"],
+                "defect_rate": defect,
+                "risk_score": risk_score,
+                "actual_lead_time": r["default_lead_time"] + drift
+            })
+            
+        if not scorecard:
+            scorecard = [{
+                "supplier_id": "SUP-001",
+                "supplier_name": "Kolkata Cosmetics Co.",
+                "location": "Kolkata",
+                "lead_time_days": 15,
+                "defect_rate": 0.0200,
+                "risk_score": 20.0,
+                "actual_lead_time": 15.0
+            }]
 
         purchase_orders = []
         total_order_value = 0.0
@@ -218,26 +257,52 @@ async def compute_replenishment(task_id: str, product_id: str | None):
         for row in at_risk:
             units = int(row["units_to_order"])
             unit_price = float(row["price"])
-            order_value = units * unit_price
-            expected_delivery = (datetime.utcnow() + timedelta(days=best_supplier["lead_time_days"])).date()
+            
+            # Sort by risk score to find primary supplier (lowest risk)
+            scorecard.sort(key=lambda x: x["risk_score"])
+            primary = scorecard[0]
+            
+            # Find backup supplier (fastest actual lead time that is not primary)
+            backup_candidates = [s for s in scorecard if s["supplier_id"] != primary["supplier_id"]]
+            backup_candidates.sort(key=lambda x: x["actual_lead_time"])
+            backup = backup_candidates[0] if backup_candidates else primary
 
-            purchase_orders.append({
-                "po_number": f"PO-{uuid.uuid4().hex[:8].upper()}",
-                "product_id": row["product_id"],
-                "product_name": row["product_name"],
-                "location": row["location"],
-                "current_stock": row["stock_level"],
-                "reorder_point": row["reorder_point"],
-                "order_quantity": units,
-                "unit_price": unit_price,
-                "order_value": round(order_value, 2),
-                "supplier_id": best_supplier["supplier_id"],
-                "supplier_name": best_supplier["supplier_name"],
-                "lead_time_days": best_supplier["lead_time_days"],
-                "expected_delivery": str(expected_delivery),
-                "status": "draft"
-            })
-            total_order_value += order_value
+            # Sourcing Optimization decision: Split order if quantity is large (> 150 units)
+            if units > 150 and len(scorecard) > 1:
+                qty_primary = int(units * 0.7)
+                qty_backup = units - qty_primary
+                
+                splits = [
+                    (primary, qty_primary, f"Primary allocation (70%) based on low risk score ({primary['risk_score']:.1f})."),
+                    (backup, qty_backup, f"Risk-hedged allocation (30%) routed to fastest backup supplier ({backup['supplier_name']}) to prevent stockouts.")
+                ]
+            else:
+                splits = [
+                    (primary, units, f"Standard allocation based on low risk score ({primary['risk_score']:.1f}).")
+                ]
+
+            for supplier, qty, notes in splits:
+                order_value = qty * unit_price
+                expected_delivery = (datetime.utcnow() + timedelta(days=supplier["lead_time_days"])).date()
+                
+                purchase_orders.append({
+                    "po_number": f"PO-{uuid.uuid4().hex[:8].upper()}",
+                    "product_id": row["product_id"],
+                    "product_name": row["product_name"],
+                    "location": row["location"],
+                    "current_stock": row["stock_level"],
+                    "reorder_point": row["reorder_point"],
+                    "order_quantity": qty,
+                    "unit_price": unit_price,
+                    "order_value": round(order_value, 2),
+                    "supplier_id": supplier["supplier_id"],
+                    "supplier_name": supplier["supplier_name"],
+                    "lead_time_days": supplier["lead_time_days"],
+                    "expected_delivery": str(expected_delivery),
+                    "status": "draft",
+                    "notes": notes
+                })
+                total_order_value += order_value
 
         summary = (
             f"Generated {len(purchase_orders)} purchase order(s) for "
@@ -351,13 +416,17 @@ async def _apply_purchase_orders(purchase_orders: list, proposal_id: str | None 
                 expected_delivery DATE,
                 status          TEXT DEFAULT 'approved',
                 created_at      TIMESTAMPTZ DEFAULT NOW(),
-                jira_ticket_key TEXT
+                jira_ticket_key TEXT,
+                notes           TEXT
             )
         """)
 
-        # Dynamically add jira_ticket_key column if not exists
+        # Dynamically add jira_ticket_key and notes columns if not exists
         await conn.execute("""
             ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS jira_ticket_key TEXT;
+        """)
+        await conn.execute("""
+            ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS notes TEXT;
         """)
 
         for po in purchase_orders:
@@ -409,14 +478,14 @@ async def _apply_purchase_orders(purchase_orders: list, proposal_id: str | None 
                             po_number, product_id, product_name, location,
                             supplier_id, supplier_name, order_quantity,
                             unit_price, order_value, lead_time_days,
-                            expected_delivery, status, jira_ticket_key
-                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved',$12)
+                            expected_delivery, status, jira_ticket_key, notes
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved',$12,$13)
                         ON CONFLICT (po_number) DO UPDATE SET jira_ticket_key = EXCLUDED.jira_ticket_key
                     """,
-                        po["po_number"], po["product_id"], po["product_name"],
-                        po["location"], po["supplier_id"], po["supplier_name"],
-                        po["order_quantity"], po["unit_price"], po["order_value"],
-                        po["lead_time_days"], expected_delivery, jira_ticket_key
+                    po["po_number"], po["product_id"], po["product_name"],
+                    po["location"], po["supplier_id"], po["supplier_name"],
+                    po["order_quantity"], po["unit_price"], po["order_value"],
+                    po["lead_time_days"], expected_delivery, jira_ticket_key, po.get("notes")
                     )
 
                     # Update inventory — fill to max_capacity
