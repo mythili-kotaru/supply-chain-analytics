@@ -1,11 +1,20 @@
 import logging
 import json
+import uuid
+import datetime
+import httpx
+import os
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import asyncpg
 
 from database import get_db
+from models import ApplyMitigationRequest
+
+logger = logging.getLogger(__name__)
+
+LANGGRAPH_AGENT_URL = os.getenv("LANGGRAPH_AGENT_URL", "http://localhost:8004")
 
 logger = logging.getLogger(__name__)
 
@@ -341,3 +350,144 @@ async def run_simulation(req: SimulationRequest, db: asyncpg.Pool = Depends(get_
     except Exception as e:
         logger.exception("Error running scenario simulation")
         raise HTTPException(status_code=500, detail=f"Simulation failed: {str(e)}")
+
+
+@router.post("/simulation/apply-mitigation")
+async def apply_mitigation(req: ApplyMitigationRequest, db: asyncpg.Pool = Depends(get_db)):
+    """
+    Day 12: Draft a real executable proposal in the DB based on a Sandbox mitigation action,
+    and invoke the LangGraph supervisor to serialize graph state and pause at HITL.
+    """
+    proposal_id = str(uuid.uuid4())
+    proposal_type = "allocation" if req.action_type == "transfer" else "replenishment"
+    
+    async with db.acquire() as conn:
+        # Get product pricing
+        price_row = await conn.fetchrow("SELECT price FROM products WHERE product_id = $1", req.product_id)
+        price = float(price_row["price"]) if price_row and price_row["price"] else 15.0
+        
+        # Determine supplier details for POs
+        supplier_id = None
+        lead_time_days = 10
+        supplier_name = req.supplier_name
+        
+        if req.action_type == "purchase_order":
+            if req.supplier_name:
+                sup_row = await conn.fetchrow(
+                    "SELECT supplier_id, lead_time_days FROM suppliers WHERE supplier_name = $1 LIMIT 1",
+                    req.supplier_name
+                )
+                if sup_row:
+                    supplier_id = sup_row["supplier_id"]
+                    lead_time_days = sup_row["lead_time_days"]
+            
+            # Fallback if supplier not found by name
+            if not supplier_id:
+                hist_sup = await conn.fetchrow("""
+                    SELECT s.supplier_id, s.supplier_name, s.lead_time_days
+                    FROM supply_chain_records r
+                    JOIN suppliers s ON s.supplier_id = r.supplier_id
+                    WHERE r.product_id = $1 LIMIT 1
+                """, req.product_id)
+                if hist_sup:
+                    supplier_id = hist_sup["supplier_id"]
+                    supplier_name = hist_sup["supplier_name"]
+                    lead_time_days = hist_sup["lead_time_days"]
+                else:
+                    supplier_id = "SUP-001" # Default fallback
+                    supplier_name = "Global Wellness Distributors"
+                    lead_time_days = 5
+        
+        # Prepare payloads
+        replenishment_payload = None
+        allocation_payload = None
+        agent_reasoning = f"Sandbox Mitigation Plan: {req.action_type.replace('_', ' ').title()} of {req.quantity} units of {req.product_name} at {req.location}."
+        
+        if req.action_type == "transfer":
+            allocation_payload = {
+                "transfers": [
+                    {
+                        "product_id": req.product_id,
+                        "product_name": req.product_name,
+                        "from_location": req.source_location or "Northeast",
+                        "to_location": req.location,
+                        "transfer_quantity": req.quantity,
+                        "reason": f"Transferred from {req.source_location or 'Northeast'} to resolve simulated stockout at {req.location}"
+                    }
+                ],
+                "summary": f"Sandbox allocation plan: transfer {req.quantity} units of {req.product_name} from {req.source_location or 'Northeast'} to {req.location}."
+            }
+        else: # purchase_order
+            po_num = f"PO-SB-{proposal_id[:8].upper()}"
+            order_val = float(req.quantity) * price
+            replenishment_payload = {
+                "purchase_orders": [
+                    {
+                        "po_number": po_num,
+                        "supplier_id": supplier_id,
+                        "supplier_name": supplier_name,
+                        "order_quantity": req.quantity,
+                        "order_value": order_val,
+                        "lead_time_days": lead_time_days,
+                        "expected_delivery": (datetime.date.today() + datetime.timedelta(days=lead_time_days)).strftime("%Y-%m-%d")
+                    }
+                ],
+                "total_order_value": order_val
+            }
+            
+        # Insert proposal row into the database
+        await conn.execute("""
+            INSERT INTO proposals (
+                id, type, status, severity, created_at,
+                trigger_product_id, trigger_product_name, trigger_location,
+                trigger_metric, trigger_current_value, trigger_threshold,
+                agent_reasoning, replenishment_payload, allocation_payload
+            ) VALUES (
+                $1, $2, 'pending', 'CRITICAL', NOW(),
+                $3, $4, $5,
+                'stock_level', 0, 0,
+                $6, $7::jsonb, $8::jsonb
+            )
+        """, 
+            proposal_id, 
+            proposal_type,
+            req.product_id,
+            req.product_name,
+            req.location,
+            agent_reasoning,
+            json.dumps(replenishment_payload) if replenishment_payload else None,
+            json.dumps(allocation_payload) if allocation_payload else None
+        )
+        
+    # Call /invoke on the LangGraph agent to serialize state and pause at HITL
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            invoke_payload = {
+                "proposal_id": proposal_id,
+                "proposal_type": proposal_type,
+                "product_id": req.product_id,
+                "product_name": req.product_name,
+                "location": req.location,
+                "severity": "CRITICAL",
+                "trigger_metric": "stock_level",
+                "trigger_value": float(req.quantity),
+                "trigger_threshold": 0.0,
+                "user_role": "admin",
+                "allocation_payload": allocation_payload,
+                "replenishment_payload": replenishment_payload
+            }
+            resp = await client.post(
+                f"{LANGGRAPH_AGENT_URL}/invoke",
+                json=invoke_payload
+            )
+            if resp.status_code != 200:
+                logger.error(f"LangGraph invoke failed for sandbox mitigation: {resp.status_code} - {resp.text}")
+    except Exception as e:
+        logger.error(f"Error calling langgraph_agent invoke: {e}")
+
+    return {
+        "status": "success",
+        "proposal_id": proposal_id,
+        "message": f"Successfully drafted sandbox mitigation proposal {proposal_id} in pending queue."
+    }
+

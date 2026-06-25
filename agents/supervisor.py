@@ -201,6 +201,7 @@ async def allocation_replenishment_node(state: SupplyChainState, config: Optiona
     """
     Delegate allocation and replenishment tasks to A2A services.
     Polls until both tasks complete or fail.
+    If pre-computed results are already provided in the state, uses them directly.
     """
     queue = config.get("configurable", {}).get("stream_queue") if config else None
     # Determine what to trigger based on original intent
@@ -208,34 +209,52 @@ async def allocation_replenishment_node(state: SupplyChainState, config: Optiona
 
     alloc_task_id = None
     replen_task_id = None
+    
+    # Check if pre-computed results are already in the state
+    alloc_result = state.get("allocation_result")
+    replen_result = state.get("replenishment_result")
 
     if intent in ("allocation", "replenishment"):
-        if queue:
-            await queue.put({"event": "thought", "message": f"Triggering A2A Allocation task for SKU: {state.get('parsed_intent', {}).get('product_id')}..."})
-        # Trigger allocation first
-        alloc_task_id = await trigger_allocation(
-            product_id=state.get("parsed_intent", {}).get("product_id"),
-            region=state.get("parsed_intent", {}).get("region"),
-            role=state.get("user_role", "analyst")
-        )
-        if queue:
-            await queue.put({"event": "thought", "message": f"Allocation task triggered successfully. Task ID: {alloc_task_id}"})
+        if alloc_result:
+            if queue:
+                await queue.put({"event": "thought", "message": "Using pre-computed allocation mitigation payload."})
+            logger.info("Using pre-computed allocation_result from state")
+        else:
+            if queue:
+                await queue.put({"event": "thought", "message": f"Triggering A2A Allocation task for SKU: {state.get('parsed_intent', {}).get('product_id')}..."})
+            # Trigger allocation first
+            alloc_task_id = await trigger_allocation(
+                product_id=state.get("parsed_intent", {}).get("product_id"),
+                region=state.get("parsed_intent", {}).get("region"),
+                role=state.get("user_role", "analyst")
+            )
+            if queue:
+                await queue.put({"event": "thought", "message": f"Allocation task triggered successfully. Task ID: {alloc_task_id}"})
 
     if intent == "replenishment":
-        if queue:
-            await queue.put({"event": "thought", "message": f"Triggering A2A Replenishment task for SKU: {state.get('parsed_intent', {}).get('product_id')}..."})
-        replen_task_id = await trigger_replenishment(
-            product_id=state.get("parsed_intent", {}).get("product_id"),
-            role=state.get("user_role", "analyst")
-        )
-        if queue:
-            await queue.put({"event": "thought", "message": f"Replenishment task triggered successfully. Task ID: {replen_task_id}"})
+        if replen_result:
+            if queue:
+                await queue.put({"event": "thought", "message": "Using pre-computed replenishment mitigation payload."})
+            logger.info("Using pre-computed replenishment_result from state")
+        else:
+            if queue:
+                await queue.put({"event": "thought", "message": f"Triggering A2A Replenishment task for SKU: {state.get('parsed_intent', {}).get('product_id')}..."})
+            replen_task_id = await trigger_replenishment(
+                product_id=state.get("parsed_intent", {}).get("product_id"),
+                role=state.get("user_role", "analyst")
+            )
+            if queue:
+                await queue.put({"event": "thought", "message": f"Replenishment task triggered successfully. Task ID: {replen_task_id}"})
 
-    # Poll for results
-    if queue:
-        await queue.put({"event": "thought", "message": "Initiating background execution task polling..."})
-    alloc_result = await poll_task("allocation", alloc_task_id, config=config) if alloc_task_id else None
-    replen_result = await poll_task("replenishment", replen_task_id, config=config) if replen_task_id else None
+    # Poll for results if tasks were triggered
+    if alloc_task_id:
+        if queue:
+            await queue.put({"event": "thought", "message": "Initiating background execution task polling..."})
+        alloc_result = await poll_task("allocation", alloc_task_id, config=config)
+    if replen_task_id:
+        if not alloc_task_id and queue:
+            await queue.put({"event": "thought", "message": "Initiating background execution task polling..."})
+        replen_result = await poll_task("replenishment", replen_task_id, config=config)
 
     summary_parts = []
     if alloc_result:

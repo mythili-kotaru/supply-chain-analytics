@@ -22,6 +22,7 @@ import type {
   SupplierScorecardItem,
   SimulationParams,
   SimulationResponse,
+  MitigationAction,
 } from "@/types";
 
 // In Next.js, /api/... routes are always relative to the current origin
@@ -158,6 +159,12 @@ export const api = {
     apiFetch<SimulationResponse>("/simulation/run", {
       method: "POST",
       body: JSON.stringify(params),
+    }),
+
+  applyMitigation: (action: MitigationAction) =>
+    apiFetch<{ status: string; proposal_id: string; message: string }>("/simulation/apply-mitigation", {
+      method: "POST",
+      body: JSON.stringify(action),
     }),
 
   // ── Charts ──────────────────────────────────────────────────────────────────

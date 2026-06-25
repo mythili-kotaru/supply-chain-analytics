@@ -209,22 +209,54 @@ export function CoPilotChat({ isOpen, onClose, userRole }: CoPilotChatProps) {
       approved ? "success" : "info"
     );
 
-    if (approved && threadId) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(msgId);
+
+    if (threadId) {
       setLoading(true);
       let actionThoughts: string[] = [];
+      let finalSummary = "";
       try {
-        await api.streamProposalApprove(msgId, (event) => {
-          if (event.event === "thought") {
-            actionThoughts.push(event.message);
-            setActiveThoughts([...actionThoughts]);
+        if (isUuid) {
+          if (approved) {
+            await api.streamProposalApprove(msgId, (event) => {
+              if (event.event === "thought") {
+                actionThoughts.push(event.message);
+                setActiveThoughts([...actionThoughts]);
+              }
+            });
+            finalSummary = "✅ Inventory actions executed successfully in live database.";
+          } else {
+            await api.streamProposalReject(msgId, (event) => {
+              if (event.event === "thought") {
+                actionThoughts.push(event.message);
+                setActiveThoughts([...actionThoughts]);
+              }
+            });
+            finalSummary = "❌ Proposal rejected and supervisor workflow completed.";
           }
-        });
+        } else {
+          // In-chat generated proposal, resume using streamChat
+          await api.streamChat(approved ? "approve" : "reject", threadId, (event) => {
+            if (event.event === "thought") {
+              actionThoughts.push(event.message);
+              setActiveThoughts([...actionThoughts]);
+            } else if (event.event === "complete") {
+              finalSummary = event.agent_summary;
+            }
+          });
+          if (!finalSummary) {
+            finalSummary = approved 
+              ? "✅ Inventory actions executed successfully via chat conversation." 
+              : "❌ Proposal rejected and supervisor workflow completed.";
+          }
+        }
+
         setMessages((prev) => [
           ...prev,
           {
             id: Math.random().toString(),
             sender: "bot",
-            text: "✅ Inventory actions executed successfully in live database.",
+            text: finalSummary,
             thoughts: [...actionThoughts],
           },
         ]);

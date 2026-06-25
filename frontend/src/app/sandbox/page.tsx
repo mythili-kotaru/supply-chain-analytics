@@ -135,22 +135,43 @@ export default function SandboxPage() {
     }
   }, [loading]);
 
-  const handleApplyMitigation = (action: MitigationAction) => {
+  const handleApplyMitigation = async (action: MitigationAction) => {
     addToast(
-      <div className="flex flex-col gap-1">
-        <span className="font-semibold text-white">Mitigation Applied!</span>
-        <span className="text-xs text-slate-300">
-          {action.action_type === "transfer" 
-            ? `Initiated stock transfer of ${action.quantity} units from ${action.source_location}.`
-            : `Drafted purchase order for ${action.quantity} units with ${action.supplier_name}.`
-          }
-        </span>
-        <span className="text-[10px] text-blue-400 mt-1 font-mono">
-          Synced with LangGraph autonomous monitoring loop.
-        </span>
+      <div className="flex items-center gap-2">
+        <div className="w-3.5 h-3.5 border border-slate-350 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+        <span className="text-xs text-slate-300">Drafting sandbox proposal in database...</span>
       </div>,
-      "success"
+      "info"
     );
+
+    try {
+      const result = await api.applyMitigation(action);
+      
+      // Update local stats counter to increment pending approvals
+      setStats((prev) => ({
+        ...prev,
+        pending_approvals: prev.pending_approvals + 1,
+      }));
+
+      addToast(
+        <div className="flex flex-col gap-1">
+          <span className="font-semibold text-white">Mitigation Proposal Drafted!</span>
+          <span className="text-xs text-slate-300">
+            {action.action_type === "transfer" 
+              ? `Drafted transfer of ${action.quantity} units from ${action.source_location || "Northeast"}.`
+              : `Drafted purchase order for ${action.quantity} units from ${action.supplier_name || "primary supplier"}.`
+            }
+          </span>
+          <span className="text-[10px] text-blue-400 mt-1 font-mono">
+            Supervisor thread registered: {result.proposal_id.slice(0, 8)}
+          </span>
+        </div>,
+        "success"
+      );
+    } catch (e: any) {
+      console.error(e);
+      addToast(e.message || "Failed to apply sandbox mitigation", "error");
+    }
   };
 
   const handleReset = () => {

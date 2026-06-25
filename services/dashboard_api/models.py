@@ -152,3 +152,14 @@ class SupplierModel(BaseModel):
     location: str
     lead_time_days: int
     defect_rate: float
+
+
+class ApplyMitigationRequest(BaseModel):
+    product_id: str
+    product_name: str
+    location: str
+    action_type: str  # "transfer" or "purchase_order"
+    quantity: int
+    source_location: Optional[str] = None
+    supplier_name: Optional[str] = None
+

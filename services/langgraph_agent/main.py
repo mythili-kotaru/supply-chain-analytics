@@ -123,6 +123,8 @@ class InvokeRequest(BaseModel):
     trigger_value: float = 0.0
     trigger_threshold: float = 0.0
     user_role: str = "analyst"
+    allocation_payload: Optional[dict] = None
+    replenishment_payload: Optional[dict] = None
 
 
 class InvokeResponse(BaseModel):
@@ -494,6 +496,8 @@ async def run_invoke(req: InvokeRequest) -> InvokeResponse:
         "human_approved": None,
         "tuning_iterations": 0,
         "error": None,
+        "allocation_result": req.allocation_payload,
+        "replenishment_result": req.replenishment_payload,
         "parsed_intent": {
             "product_id": req.product_id,
             "region": req.location,
