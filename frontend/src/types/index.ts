@@ -291,3 +291,22 @@ export interface SimulationResponse {
   mitigations: MitigationAction[];
 }
 
+
+// ─── Scenario Versioning (Day 14) ─────────────────────────────────────
+
+export interface SavedScenario {
+  id: string;
+  name: string;
+  demand_multiplier: number;
+  lead_time_multiplier: number;
+  disrupted_supplier_id: string | null;
+  disrupted_supplier_name: string | null;
+  created_at: string;
+  critical_stockouts: number;
+  total_mitigation_cost: number;
+  avg_mitigation_risk: number;
+  total_mitigations_count: number;
+  charts_data: ChartData[];
+}
+
+

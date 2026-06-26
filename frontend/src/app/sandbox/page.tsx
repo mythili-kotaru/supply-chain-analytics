@@ -25,6 +25,9 @@ import {
   ShoppingBag,
   ArrowRightLeft,
   Info,
+  Save,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { api } from "@/lib/api";
@@ -34,7 +37,8 @@ import type {
   SimulationResponse, 
   ChartData,
   MitigationAction,
-  SupplierScorecardItem
+  SupplierScorecardItem,
+  SavedScenario
 } from "@/types";
 
 ChartJS.register(
@@ -57,6 +61,9 @@ const EMPTY_STATS: DashboardStats = {
   services: [],
 };
 
+const SaveIcon = Save as any;
+const TrashIcon = Trash2 as any;
+const PlusIcon = Plus as any;
 const ZapIcon = Zap as any;
 const TrendingUpIcon = TrendingUp as any;
 const ClockIcon = Clock as any;
@@ -89,6 +96,13 @@ export default function SandboxPage() {
 
   // Selected supplier override state for each purchase order mitigation
   const [selectedSuppliers, setSelectedSuppliers] = useState<Record<string, string>>({});
+
+  // Scenario Versioning states
+  const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
+  const [compareList, setCompareList] = useState<string[]>([]);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [newScenarioName, setNewScenarioName] = useState("");
+  const [savingScenario, setSavingScenario] = useState(false);
 
   const getSelectedSupplierForAction = (action: MitigationAction) => {
     const key = `${action.product_id}::${action.location}`;
@@ -127,16 +141,143 @@ export default function SandboxPage() {
     handleApplyMitigation(action);
   };
 
-  // Fetch initial stats and suppliers list
+  // Fetch initial stats, suppliers list, and saved scenarios
   useEffect(() => {
-    Promise.all([api.getStats(), api.getSourcingScorecard()])
-      .then(([statsData, sourcingData]) => {
+    Promise.all([api.getStats(), api.getSourcingScorecard(), api.getSavedScenarios()])
+      .then(([statsData, sourcingData, scenariosData]) => {
         setStats(statsData);
         setSuppliers(sourcingData);
+        setSavedScenarios(scenariosData);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  const handleSaveScenarioSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newScenarioName.trim() || !simResults) return;
+    setSavingScenario(true);
+    
+    // Calculate outcome stats
+    const critical_stockouts = simResults.stockout_details.filter(d => d.simulated_days_to_stockout < 30).length;
+    const total_mitigation_cost = simResults.mitigations.reduce((acc, curr) => {
+      if (curr.action_type === 'purchase_order') {
+        const sup = getSelectedSupplierForAction(curr);
+        return acc + (curr.quantity * (sup?.price || 15.0));
+      }
+      return acc;
+    }, 0);
+    const avg_mitigation_risk = simResults.mitigations.length > 0 
+      ? (simResults.mitigations.reduce((acc, curr) => {
+          if (curr.action_type === 'purchase_order') {
+            const sup = getSelectedSupplierForAction(curr);
+            return acc + (sup?.risk_score || 0);
+          }
+          return acc + (curr.risk_score || 0);
+        }, 0) / simResults.mitigations.length) 
+      : 0;
+    const total_mitigations_count = simResults.mitigations.length;
+    
+    try {
+      const selectedSupplierItem = suppliers.find(s => s.supplier_id === disruptedSupplierId);
+      await api.saveScenario({
+        name: newScenarioName.trim(),
+        demand_multiplier: demandMultiplier,
+        lead_time_multiplier: leadTimeMultiplier,
+        disrupted_supplier_id: disruptedSupplierId || null,
+        disrupted_supplier_name: selectedSupplierItem ? selectedSupplierItem.supplier_name : null,
+        critical_stockouts,
+        total_mitigation_cost,
+        avg_mitigation_risk,
+        total_mitigations_count,
+        charts_data: simResults.charts
+      });
+      addToast(`Scenario '${newScenarioName}' saved successfully!`, "success");
+      setNewScenarioName("");
+      setShowSaveModal(false);
+      
+      const scenariosList = await api.getSavedScenarios();
+      setSavedScenarios(scenariosList);
+    } catch (err: any) {
+      console.error(err);
+      addToast(err.message || "Failed to save scenario", "error");
+    } finally {
+      setSavingScenario(false);
+    }
+  };
+
+  const handleDeleteScenario = async (id: string, name: string) => {
+    try {
+      await api.deleteScenario(id);
+      addToast(`Scenario '${name}' deleted.`, "info");
+      setCompareList(prev => prev.filter(x => x !== id));
+      
+      const scenariosList = await api.getSavedScenarios();
+      setSavedScenarios(scenariosList);
+    } catch (err: any) {
+      console.error(err);
+      addToast(err.message || "Failed to delete scenario", "error");
+    }
+  };
+
+  const handleLoadScenarioParams = (scenario: SavedScenario) => {
+    setDemandMultiplier(scenario.demand_multiplier);
+    setLeadTimeMultiplier(scenario.lead_time_multiplier);
+    setDisruptedSupplierId(scenario.disrupted_supplier_id || "");
+    handleRunSimulation(scenario.demand_multiplier, scenario.lead_time_multiplier, scenario.disrupted_supplier_id || "");
+    addToast(`Loaded parameters from scenario '${scenario.name}'.`, "success");
+  };
+
+  const comparisonData = useMemo(() => {
+    if (compareList.length === 0) return null;
+    
+    const scA = savedScenarios.find(s => s.id === compareList[0]);
+    if (!scA) return null;
+
+    let scBName = "Active Sandbox (Unsaved)";
+    let scB_stockouts = simResults?.stockout_details.filter(d => d.simulated_days_to_stockout < 30).length || 0;
+    let scB_cost = simResults?.mitigations.reduce((acc, curr) => {
+      if (curr.action_type === 'purchase_order') {
+        const sup = getSelectedSupplierForAction(curr);
+        return acc + (curr.quantity * (sup?.price || 15.0));
+      }
+      return acc;
+    }, 0) || 0;
+    let scB_risk = simResults?.mitigations.length && simResults.mitigations.length > 0 
+      ? (simResults.mitigations.reduce((acc, curr) => {
+          if (curr.action_type === 'purchase_order') {
+            const sup = getSelectedSupplierForAction(curr);
+            return acc + (sup?.risk_score || 0);
+          }
+          return acc + (curr.risk_score || 0);
+        }, 0) / simResults.mitigations.length) 
+      : 0;
+
+    if (compareList.length >= 2) {
+      const sc2 = savedScenarios.find(s => s.id === compareList[1]);
+      if (sc2) {
+        scBName = sc2.name;
+        scB_stockouts = sc2.critical_stockouts;
+        scB_cost = sc2.total_mitigation_cost;
+        scB_risk = sc2.avg_mitigation_risk;
+      }
+    }
+
+    return {
+      scAName: scA.name,
+      scBName,
+      scA: {
+        stockouts: scA.critical_stockouts,
+        cost: scA.total_mitigation_cost,
+        risk: scA.avg_mitigation_risk
+      },
+      scB: {
+        stockouts: scB_stockouts,
+        cost: scB_cost,
+        risk: scB_risk
+      }
+    };
+  }, [compareList, savedScenarios, simResults, selectedSuppliers]);
 
   // Trigger simulation run when parameters change
   const handleRunSimulation = async (
@@ -237,32 +378,57 @@ export default function SandboxPage() {
     const baseStock = selectedChart.timeline.map(p => p.base_stock);
     const simulatedStock = selectedChart.timeline.map(p => p.simulated_stock);
 
-    return {
-      labels,
-      datasets: [
-        {
-          label: "Baseline Projection",
-          data: baseStock,
-          borderColor: "rgb(59, 130, 246)",
-          backgroundColor: "rgba(59, 130, 246, 0.05)",
-          borderWidth: 2,
-          pointRadius: 1,
-          pointHoverRadius: 4,
-          fill: true,
-        },
-        {
-          label: "Simulated Scenario",
-          data: simulatedStock,
-          borderColor: "rgb(236, 72, 153)",
-          backgroundColor: "rgba(236, 72, 153, 0.05)",
-          borderWidth: 2.5,
-          pointRadius: 1,
-          pointHoverRadius: 4,
-          fill: true,
+    const datasets: any[] = [
+      {
+        label: "Baseline Projection",
+        data: baseStock,
+        borderColor: "rgb(59, 130, 246)",
+        backgroundColor: "rgba(59, 130, 246, 0.05)",
+        borderWidth: 2,
+        pointRadius: 1,
+        pointHoverRadius: 4,
+        fill: true,
+      }
+    ];
+
+    if (compareList.length > 0) {
+      const colors = ["rgb(249, 115, 22)", "rgb(34, 197, 94)"]; // orange, green
+      const bgColors = ["rgba(249, 115, 22, 0.05)", "rgba(34, 197, 94, 0.05)"];
+      
+      compareList.forEach((id, idx) => {
+        const sc = savedScenarios.find(s => s.id === id);
+        if (sc) {
+          const cData = sc.charts_data.find(c => c.product_id === selectedChart.product_id && c.location === selectedChart.location);
+          if (cData) {
+            const cStock = cData.timeline.map(p => p.simulated_stock);
+            datasets.push({
+              label: `${sc.name} (Sim)`,
+              data: cStock,
+              borderColor: colors[idx % colors.length],
+              backgroundColor: bgColors[idx % bgColors.length],
+              borderWidth: 2.5,
+              pointRadius: 1,
+              pointHoverRadius: 4,
+              fill: true,
+            });
+          }
         }
-      ]
-    };
-  }, [selectedChart]);
+      });
+    } else {
+      datasets.push({
+        label: "Simulated Scenario",
+        data: simulatedStock,
+        borderColor: "rgb(236, 72, 153)",
+        backgroundColor: "rgba(236, 72, 153, 0.05)",
+        borderWidth: 2.5,
+        pointRadius: 1,
+        pointHoverRadius: 4,
+        fill: true,
+      });
+    }
+
+    return { labels, datasets };
+  }, [selectedChart, compareList, savedScenarios]);
 
   const lineChartOptions = useMemo(() => {
     if (!simResults || !selectedKey) return {};
@@ -328,14 +494,95 @@ export default function SandboxPage() {
             </p>
           </div>
 
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors"
-          >
-            <RefreshCwIcon className="w-4 h-4" />
-            Reset Sandbox
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowSaveModal(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-fuchsia-600 hover:bg-fuchsia-700 rounded-lg transition-colors"
+            >
+              <SaveIcon className="w-4 h-4" />
+              Save Scenario
+            </button>
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors"
+            >
+              <RefreshCwIcon className="w-4 h-4" />
+              Reset Sandbox
+            </button>
+          </div>
         </div>
+
+        {/* Scenario Comparison Deck */}
+        {comparisonData && (
+          <div className="bg-slate-905/85 border border-fuchsia-500/40 rounded-xl p-5 shadow-2xl animate-in slide-in-from-top-4 duration-200">
+            <div className="flex items-center gap-2 mb-3 border-b border-slate-800/80 pb-2.5">
+              <TrendingDownIcon className="w-5 h-5 text-fuchsia-400" />
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                Scenario Comparison: <span className="text-fuchsia-400">{comparisonData.scAName}</span> vs <span className="text-blue-400">{comparisonData.scBName}</span>
+              </h3>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-slate-950/60 rounded-lg p-4 border border-slate-850 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Critical Stockout Diffs</span>
+                  <div className="flex items-baseline gap-4 mt-2">
+                    <span className="text-lg font-semibold text-slate-300 font-mono">{comparisonData.scA.stockouts} vs {comparisonData.scB.stockouts}</span>
+                    {(() => {
+                      const diff = comparisonData.scB.stockouts - comparisonData.scA.stockouts;
+                      if (diff === 0) return <span className="text-[10px] text-slate-500">No Change</span>;
+                      return (
+                        <span className={`text-xs font-bold ${diff < 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {diff > 0 ? "+" : ""}{diff} stockouts
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/60 rounded-lg p-4 border border-slate-850 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Total Mitigation Cost Diffs</span>
+                  <div className="flex items-baseline gap-4 mt-2">
+                    <span className="text-lg font-semibold text-slate-300 font-mono">
+                      ${comparisonData.scA.cost.toLocaleString(undefined, { maximumFractionDigits: 0 })} vs ${comparisonData.scB.cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </span>
+                    {(() => {
+                      const diff = comparisonData.scB.cost - comparisonData.scA.cost;
+                      if (diff === 0) return <span className="text-[10px] text-slate-500">No Change</span>;
+                      return (
+                        <span className={`text-xs font-bold ${diff < 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {diff > 0 ? "+" : ""}${diff.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/60 rounded-lg p-4 border border-slate-850 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Avg Mitigation Risk Diffs</span>
+                  <div className="flex items-baseline gap-4 mt-2">
+                    <span className="text-lg font-semibold text-slate-300 font-mono">
+                      {comparisonData.scA.risk.toFixed(1)} vs {comparisonData.scB.risk.toFixed(1)}
+                    </span>
+                    {(() => {
+                      const diff = comparisonData.scB.risk - comparisonData.scA.risk;
+                      if (diff === 0) return <span className="text-[10px] text-slate-500">No Change</span>;
+                      return (
+                        <span className={`text-xs font-bold ${diff < 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {diff > 0 ? "+" : ""}{diff.toFixed(1)}/100
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Top Controls and Stats Deck */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -827,7 +1074,209 @@ export default function SandboxPage() {
           </div>
         </div>
 
+        {/* Scenario Library & Comparison Section */}
+        <div className="bg-slate-900/50 backdrop-blur-md border border-slate-800 rounded-xl p-5 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-base font-semibold text-white">Scenario Library</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Compare multiple saved scenario projections side-by-side (Select up to 2 for comparisons)</p>
+            </div>
+            
+            {compareList.length > 0 && (
+              <button
+                onClick={() => setCompareList([])}
+                className="text-xs text-slate-400 hover:text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors"
+              >
+                Clear Comparison ({compareList.length})
+              </button>
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            {savedScenarios.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                No scenarios saved yet. Tweak parameters and click "Save Scenario" to build your Contingency Library.
+              </div>
+            ) : (
+              <table className="w-full text-sm text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-850 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+                    <th className="py-3 px-4 text-center w-12">Compare</th>
+                    <th className="py-3 px-4">Scenario Name</th>
+                    <th className="py-3 px-4">Parameters</th>
+                    <th className="py-3 px-4 text-center">Stockouts</th>
+                    <th className="py-3 px-4 text-right">Mitigation Cost</th>
+                    <th className="py-3 px-4 text-center">Avg Risk</th>
+                    <th className="py-3 px-4 text-center">Saved At</th>
+                    <th className="py-3 px-4 text-center w-36">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-850 text-slate-300">
+                  {savedScenarios.map((scenario) => {
+                    const isChecked = compareList.includes(scenario.id);
+                    return (
+                      <tr 
+                        key={scenario.id} 
+                        className={`hover:bg-slate-850/20 transition-colors ${isChecked ? "bg-fuchsia-950/10 border-l-2 border-l-fuchsia-500" : ""}`}
+                      >
+                        <td className="py-3.5 px-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                if (compareList.length >= 2) {
+                                  addToast("You can compare a maximum of 2 scenarios simultaneously", "info");
+                                  return;
+                                }
+                                setCompareList(prev => [...prev, scenario.id]);
+                              } else {
+                                setCompareList(prev => prev.filter(id => id !== scenario.id));
+                              }
+                            }}
+                            className="w-4 h-4 accent-fuchsia-500 cursor-pointer rounded"
+                          />
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-white text-xs">{scenario.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs">
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                              Demand: {scenario.demand_multiplier}x
+                            </span>
+                            <span className="bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                              Lead Time: {scenario.lead_time_multiplier}x
+                            </span>
+                            {scenario.disrupted_supplier_id && (
+                              <span className="bg-amber-500/10 border border-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                                Outage: {scenario.disrupted_supplier_name || scenario.disrupted_supplier_id}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-center text-xs font-semibold">
+                          <span className={scenario.critical_stockouts > 0 ? "text-rose-400 font-bold" : "text-emerald-400"}>
+                            {scenario.critical_stockouts} Alerts
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono text-xs text-slate-200">
+                          ${scenario.total_mitigation_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3.5 px-4 text-center text-xs font-semibold">
+                          <span className={
+                            scenario.avg_mitigation_risk < 30 
+                              ? "text-emerald-400" 
+                              : scenario.avg_mitigation_risk < 50 
+                                ? "text-amber-400" 
+                                : "text-rose-400"
+                          }>
+                            {scenario.avg_mitigation_risk.toFixed(1)}/100
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-center text-xs text-slate-500">
+                          {new Date(scenario.created_at).toLocaleDateString()} {new Date(scenario.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleLoadScenarioParams(scenario)}
+                              className="text-[10px] font-medium bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 px-2 py-1 rounded transition-colors"
+                            >
+                              Load
+                            </button>
+                            <button
+                              onClick={() => handleDeleteScenario(scenario.id, scenario.name)}
+                              className="text-[10px] font-medium bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 hover:text-white px-2 py-1 rounded transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
       </main>
+
+      {/* Scenario Save Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="border-b border-slate-800/80 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <SaveIcon className="w-5 h-5 text-fuchsia-400" />
+                Save Contingency Scenario
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Save the current parameters, chart timelines, and metrics for historical comparisons.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveScenarioSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-300 block">Scenario Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Q3 Pandemic Spike - Primary Supplier Down"
+                  value={newScenarioName}
+                  onChange={(e) => setNewScenarioName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-fuchsia-500 transition-colors"
+                />
+              </div>
+
+              <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-850 space-y-2 text-xs">
+                <span className="font-semibold text-slate-400 block mb-1">Configuration to persist:</span>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Demand Multiplier:</span>
+                  <span className="font-mono text-slate-300 font-semibold">{demandMultiplier.toFixed(1)}x</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Lead Time Multiplier:</span>
+                  <span className="font-mono text-slate-300 font-semibold">{leadTimeMultiplier.toFixed(1)}x</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Disrupted Supplier:</span>
+                  <span className="text-slate-300">
+                    {suppliers.find(s => s.supplier_id === disruptedSupplierId)?.supplier_name || "None (All Healthy)"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSaveModal(false);
+                    setNewScenarioName("");
+                  }}
+                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-950 border border-slate-800 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingScenario || !newScenarioName.trim()}
+                  className="px-4 py-2 text-xs font-medium text-white bg-fuchsia-600 hover:bg-fuchsia-700 disabled:bg-fuchsia-800 disabled:text-slate-400 rounded-lg transition-colors flex items-center gap-1.5"
+                >
+                  {savingScenario && (
+                    <div className="w-3.5 h-3.5 border border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  <span>{savingScenario ? "Saving..." : "Save Scenario"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -592,3 +592,120 @@ async def apply_mitigation(req: ApplyMitigationRequest, db: asyncpg.Pool = Depen
         "message": f"Successfully drafted sandbox mitigation proposal {proposal_id} in pending queue."
     }
 
+
+# ── Scenario Versioning Models and Endpoints ─────────────────────────────────
+
+class SaveScenarioRequest(BaseModel):
+    name: str
+    demand_multiplier: float
+    lead_time_multiplier: float
+    disrupted_supplier_id: Optional[str] = None
+    disrupted_supplier_name: Optional[str] = None
+    critical_stockouts: int
+    total_mitigation_cost: float
+    avg_mitigation_risk: float
+    total_mitigations_count: int
+    charts_data: List[Dict[str, Any]]
+
+class SavedScenarioResponse(BaseModel):
+    id: str
+    name: str
+    demand_multiplier: float
+    lead_time_multiplier: float
+    disrupted_supplier_id: Optional[str] = None
+    disrupted_supplier_name: Optional[str] = None
+    created_at: str
+    critical_stockouts: int
+    total_mitigation_cost: float
+    avg_mitigation_risk: float
+    total_mitigations_count: int
+    charts_data: List[Dict[str, Any]]
+
+@router.post("/simulation/scenarios", response_model=Dict[str, Any])
+async def save_scenario(req: SaveScenarioRequest, db: asyncpg.Pool = Depends(get_db)):
+    """Save a scenario run parameters and key aggregated metrics to PostgreSQL."""
+    try:
+        # Check if name already exists
+        exists = await db.fetchval("SELECT COUNT(*) FROM sandbox_scenarios WHERE name = $1", req.name)
+        if exists > 0:
+            raise HTTPException(status_code=400, detail="Scenario with this name already exists")
+
+        scenario_id = str(uuid.uuid4())
+        await db.execute("""
+            INSERT INTO sandbox_scenarios (
+                id, name, demand_multiplier, lead_time_multiplier, 
+                disrupted_supplier_id, disrupted_supplier_name,
+                critical_stockouts, total_mitigation_cost, 
+                avg_mitigation_risk, total_mitigations_count, charts_data
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+        """,
+            scenario_id,
+            req.name,
+            req.demand_multiplier,
+            req.lead_time_multiplier,
+            req.disrupted_supplier_id,
+            req.disrupted_supplier_name,
+            req.critical_stockouts,
+            req.total_mitigation_cost,
+            req.avg_mitigation_risk,
+            req.total_mitigations_count,
+            json.dumps(req.charts_data)
+        )
+        return {"status": "success", "id": scenario_id, "message": f"Scenario '{req.name}' saved successfully."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving scenario: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save scenario: {str(e)}")
+
+@router.get("/simulation/scenarios", response_model=List[SavedScenarioResponse])
+async def list_scenarios(db: asyncpg.Pool = Depends(get_db)):
+    """List all saved scenarios from PostgreSQL sorted by created_at descending."""
+    try:
+        rows = await db.fetch("""
+            SELECT id, name, demand_multiplier, lead_time_multiplier, 
+                   disrupted_supplier_id, disrupted_supplier_name, created_at,
+                   critical_stockouts, total_mitigation_cost, 
+                   avg_mitigation_risk, total_mitigations_count, charts_data
+            FROM sandbox_scenarios
+            ORDER BY created_at DESC
+        """)
+        scenarios = []
+        for r in rows:
+            scenarios.append(SavedScenarioResponse(
+                id=str(r["id"]),
+                name=r["name"],
+                demand_multiplier=float(r["demand_multiplier"]),
+                lead_time_multiplier=float(r["lead_time_multiplier"]),
+                disrupted_supplier_id=r["disrupted_supplier_id"],
+                disrupted_supplier_name=r["disrupted_supplier_name"],
+                created_at=r["created_at"].isoformat(),
+                critical_stockouts=r["critical_stockouts"],
+                total_mitigation_cost=float(r["total_mitigation_cost"]),
+                avg_mitigation_risk=float(r["avg_mitigation_risk"]),
+                total_mitigations_count=r["total_mitigations_count"],
+                charts_data=json.loads(r["charts_data"]) if isinstance(r["charts_data"], str) else r["charts_data"]
+            ))
+        return scenarios
+    except Exception as e:
+        logger.error(f"Error listing scenarios: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve scenarios: {str(e)}")
+
+@router.delete("/simulation/scenarios/{id}", response_model=Dict[str, Any])
+async def delete_scenario(id: str, db: asyncpg.Pool = Depends(get_db)):
+    """Delete a saved scenario by ID."""
+    try:
+        scenario_uuid = uuid.UUID(id)
+        deleted = await db.execute("DELETE FROM sandbox_scenarios WHERE id = $1", scenario_uuid)
+        if " 0" in deleted:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+        return {"status": "success", "message": "Scenario deleted successfully."}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid scenario ID format")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting scenario {id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete scenario: {str(e)}")
+
+

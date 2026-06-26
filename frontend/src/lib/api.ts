@@ -23,6 +23,7 @@ import type {
   SimulationParams,
   SimulationResponse,
   MitigationAction,
+  SavedScenario,
 } from "@/types";
 
 // In Next.js, /api/... routes are always relative to the current origin
@@ -165,6 +166,31 @@ export const api = {
     apiFetch<{ status: string; proposal_id: string; message: string }>("/simulation/apply-mitigation", {
       method: "POST",
       body: JSON.stringify(action),
+    }),
+
+  saveScenario: (payload: {
+    name: string;
+    demand_multiplier: number;
+    lead_time_multiplier: number;
+    disrupted_supplier_id?: string | null;
+    disrupted_supplier_name?: string | null;
+    critical_stockouts: number;
+    total_mitigation_cost: number;
+    avg_mitigation_risk: number;
+    total_mitigations_count: number;
+    charts_data: any[];
+  }) =>
+    apiFetch<{ status: string; id: string; message: string }>("/simulation/scenarios", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getSavedScenarios: () =>
+    apiFetch<SavedScenario[]>("/simulation/scenarios"),
+
+  deleteScenario: (id: string) =>
+    apiFetch<{ status: string; message: string }>(`/simulation/scenarios/${id}`, {
+      method: "DELETE",
     }),
 
   // ── Charts ──────────────────────────────────────────────────────────────────
