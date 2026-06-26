@@ -260,6 +260,15 @@ export interface StockoutDetail {
   simulated_lost_revenue: number;
 }
 
+export interface AlternativeSupplier {
+  supplier_id: string;
+  supplier_name: string;
+  lead_time_days: number;
+  price: number;
+  defect_rate: number;
+  risk_score: number;
+}
+
 export interface MitigationAction {
   product_id: string;
   product_name: string;
@@ -269,6 +278,10 @@ export interface MitigationAction {
   quantity: number;
   source_location?: string | null;
   supplier_name?: string | null;
+  supplier_id?: string | null;
+  risk_score?: number | null;
+  lead_time_days?: number | null;
+  alternative_suppliers?: AlternativeSupplier[] | null;
 }
 
 export interface SimulationResponse {

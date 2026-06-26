@@ -54,6 +54,14 @@ class StockoutDetail(BaseModel):
     base_lost_revenue: float
     simulated_lost_revenue: float
 
+class AlternativeSupplier(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    lead_time_days: int
+    price: float
+    defect_rate: float
+    risk_score: float
+
 class MitigationAction(BaseModel):
     product_id: str
     product_name: str
@@ -63,6 +71,10 @@ class MitigationAction(BaseModel):
     quantity: int
     source_location: Optional[str] = None
     supplier_name: Optional[str] = None
+    supplier_id: Optional[str] = None
+    risk_score: Optional[float] = None
+    lead_time_days: Optional[int] = None
+    alternative_suppliers: Optional[List[AlternativeSupplier]] = None
 
 class SimulationResponse(BaseModel):
     summary: SimulationSummary
@@ -321,14 +333,81 @@ async def run_simulation(req: SimulationRequest, db: asyncpg.Pool = Depends(get_
                 else:
                     # Suggest Purchase Order
                     po_qty = int(item["max_capacity"] - item["stock_level"])
+                    
+                    # Query all suppliers that historically supplied this product_id
+                    alt_suppliers_query = """
+                        SELECT 
+                            s.supplier_id,
+                            s.supplier_name,
+                            s.lead_time_days AS default_lead_time,
+                            s.defect_rate AS declared_defect_rate,
+                            ROUND(AVG(CASE WHEN scr.product_id = $1 THEN scr.manufacturing_costs / NULLIF(scr.order_quantity, 0) END), 2) AS avg_unit_cost,
+                            COUNT(scr.record_id) AS total_orders,
+                            ROUND(AVG(scr.delivery_date - scr.order_date), 1) AS avg_delivery_days,
+                            ROUND(AVG((scr.delivery_date - scr.order_date) - s.lead_time_days), 1) AS avg_lead_time_drift,
+                            ROUND(
+                                (COUNT(CASE WHEN (scr.delivery_date - scr.order_date) <= s.lead_time_days THEN 1 END)::numeric / 
+                                 NULLIF(COUNT(scr.record_id), 0)) * 100,
+                                1
+                            ) AS on_time_delivery_pct
+                        FROM suppliers s
+                        LEFT JOIN supply_chain_records scr ON s.supplier_id = scr.supplier_id
+                        WHERE s.supplier_id IN (
+                            SELECT DISTINCT supplier_id 
+                            FROM supply_chain_records 
+                            WHERE product_id = $1
+                        )
+                        GROUP BY s.supplier_id, s.supplier_name, s.lead_time_days, s.defect_rate
+                    """
+                    alt_rows = await db.fetch(alt_suppliers_query, pid)
+                    
+                    alt_sups = []
+                    for r in alt_rows:
+                        on_time = float(r["on_time_delivery_pct"]) if r["on_time_delivery_pct"] is not None else 100.0
+                        drift = float(r["avg_lead_time_drift"]) if r["avg_lead_time_drift"] is not None else 0.0
+                        defect = float(r["declared_defect_rate"])
+                        
+                        defect_risk = min((defect / 0.05) * 30.0, 30.0)
+                        on_time_risk = ((100.0 - on_time) / 100.0) * 50.0
+                        drift_risk = max(min((drift / 5.0) * 20.0, 20.0), 0.0)
+                        risk_score = round(defect_risk + on_time_risk + drift_risk, 1)
+                        
+                        price = float(r["avg_unit_cost"]) if r["avg_unit_cost"] is not None else item["price"]
+                        
+                        alt_sups.append(AlternativeSupplier(
+                            supplier_id=r["supplier_id"],
+                            supplier_name=r["supplier_name"],
+                            lead_time_days=int(r["default_lead_time"]),
+                            price=price,
+                            defect_rate=defect,
+                            risk_score=risk_score
+                        ))
+                    
+                    alt_sups.sort(key=lambda x: x.risk_score)
+                    
+                    if not alt_sups:
+                        alt_sups.append(AlternativeSupplier(
+                            supplier_id=item["supplier_id"] or "SUP-001",
+                            supplier_name=item["supplier_name"] or "Primary Supplier",
+                            lead_time_days=item["base_lead_time"] or 10,
+                            price=item["price"],
+                            defect_rate=0.02,
+                            risk_score=20.0
+                        ))
+                    
+                    best_sup = alt_sups[0]
                     mitigations.append(MitigationAction(
                         product_id=pid,
                         product_name=item["product_name"],
                         location=loc,
                         action_type="purchase_order",
-                        details=f"Place urgent replenishment order for {po_qty} units with {item['supplier_name'] or 'primary supplier'}.",
+                        details=f"Place urgent replenishment order for {po_qty} units with {best_sup.supplier_name}.",
                         quantity=po_qty,
-                        supplier_name=item["supplier_name"] or "Primary Supplier"
+                        supplier_name=best_sup.supplier_name,
+                        supplier_id=best_sup.supplier_id,
+                        risk_score=best_sup.risk_score,
+                        lead_time_days=best_sup.lead_time_days,
+                        alternative_suppliers=alt_sups
                     ))
 
         # 6. Formulate summary
@@ -362,26 +441,32 @@ async def apply_mitigation(req: ApplyMitigationRequest, db: asyncpg.Pool = Depen
     proposal_type = "allocation" if req.action_type == "transfer" else "replenishment"
     
     async with db.acquire() as conn:
-        # Get product pricing
-        price_row = await conn.fetchrow("SELECT price FROM products WHERE product_id = $1", req.product_id)
-        price = float(price_row["price"]) if price_row and price_row["price"] else 15.0
-        
         # Determine supplier details for POs
         supplier_id = None
         lead_time_days = 10
         supplier_name = req.supplier_name
         
         if req.action_type == "purchase_order":
-            if req.supplier_name:
+            if req.supplier_id:
                 sup_row = await conn.fetchrow(
-                    "SELECT supplier_id, lead_time_days FROM suppliers WHERE supplier_name = $1 LIMIT 1",
+                    "SELECT supplier_id, lead_time_days, supplier_name FROM suppliers WHERE supplier_id = $1 LIMIT 1",
+                    req.supplier_id
+                )
+                if sup_row:
+                    supplier_id = sup_row["supplier_id"]
+                    supplier_name = sup_row["supplier_name"]
+                    lead_time_days = sup_row["lead_time_days"]
+            elif req.supplier_name:
+                sup_row = await conn.fetchrow(
+                    "SELECT supplier_id, lead_time_days, supplier_name FROM suppliers WHERE supplier_name = $1 LIMIT 1",
                     req.supplier_name
                 )
                 if sup_row:
                     supplier_id = sup_row["supplier_id"]
+                    supplier_name = sup_row["supplier_name"]
                     lead_time_days = sup_row["lead_time_days"]
             
-            # Fallback if supplier not found by name
+            # Fallback if supplier not found by name/id
             if not supplier_id:
                 hist_sup = await conn.fetchrow("""
                     SELECT s.supplier_id, s.supplier_name, s.lead_time_days
@@ -397,6 +482,22 @@ async def apply_mitigation(req: ApplyMitigationRequest, db: asyncpg.Pool = Depen
                     supplier_id = "SUP-001" # Default fallback
                     supplier_name = "Global Wellness Distributors"
                     lead_time_days = 5
+            
+            # Get supplier-specific product price
+            price_row = await conn.fetchrow("""
+                SELECT ROUND(AVG(manufacturing_costs / NULLIF(order_quantity, 0)), 2) AS avg_unit_cost
+                FROM supply_chain_records
+                WHERE product_id = $1 AND supplier_id = $2
+            """, req.product_id, supplier_id)
+            if price_row and price_row["avg_unit_cost"] is not None:
+                price = float(price_row["avg_unit_cost"])
+            else:
+                prod_price_row = await conn.fetchrow("SELECT price FROM products WHERE product_id = $1", req.product_id)
+                price = float(prod_price_row["price"]) if prod_price_row and prod_price_row["price"] else 15.0
+        else:
+            # Transfer pricing (standard product price)
+            price_row = await conn.fetchrow("SELECT price FROM products WHERE product_id = $1", req.product_id)
+            price = float(price_row["price"]) if price_row and price_row["price"] else 15.0
         
         # Prepare payloads
         replenishment_payload = None

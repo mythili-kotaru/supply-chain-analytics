@@ -87,6 +87,46 @@ export default function SandboxPage() {
   // Selected item for the detail line chart
   const [selectedKey, setSelectedKey] = useState<string>("");
 
+  // Selected supplier override state for each purchase order mitigation
+  const [selectedSuppliers, setSelectedSuppliers] = useState<Record<string, string>>({});
+
+  const getSelectedSupplierForAction = (action: MitigationAction) => {
+    const key = `${action.product_id}::${action.location}`;
+    const stored = selectedSuppliers[key];
+    if (stored) {
+      const found = action.alternative_suppliers?.find(s => s.supplier_id === stored);
+      if (found) return found;
+    }
+    return action.alternative_suppliers?.[0] || null;
+  };
+
+  const handleSelectSupplier = (action: MitigationAction, supplierId: string) => {
+    const key = `${action.product_id}::${action.location}`;
+    setSelectedSuppliers(prev => ({
+      ...prev,
+      [key]: supplierId
+    }));
+  };
+
+  const handleApplyAction = (action: MitigationAction) => {
+    if (action.action_type === "purchase_order") {
+      const activeSup = getSelectedSupplierForAction(action);
+      if (activeSup) {
+        const overriddenAction: MitigationAction = {
+          ...action,
+          supplier_id: activeSup.supplier_id,
+          supplier_name: activeSup.supplier_name,
+          lead_time_days: activeSup.lead_time_days,
+          risk_score: activeSup.risk_score,
+          details: `Place urgent replenishment order for ${action.quantity} units with ${activeSup.supplier_name} at $${activeSup.price.toFixed(2)}/unit (Risk Score: ${activeSup.risk_score}).`
+        };
+        handleApplyMitigation(overriddenAction);
+        return;
+      }
+    }
+    handleApplyMitigation(action);
+  };
+
   // Fetch initial stats and suppliers list
   useEffect(() => {
     Promise.all([api.getStats(), api.getSourcingScorecard()])
@@ -597,45 +637,105 @@ export default function SandboxPage() {
                   <div className="w-6 h-6 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : simResults && simResults.mitigations.length > 0 ? (
-                simResults.mitigations.map((action, idx) => (
-                  <div 
-                    key={idx} 
-                    className="bg-slate-950/60 border border-slate-800 hover:border-slate-700 rounded-lg p-3.5 flex flex-col gap-3 transition-colors shadow-inner"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-xs font-semibold text-white">{action.product_name}</span>
-                        <span className="text-[10px] text-slate-500 font-mono">{action.product_id} @ {action.location}</span>
-                      </div>
-                      
-                      {/* Action Type Badge */}
-                      <span className={`text-[9px] font-bold tracking-wider px-2 py-0.5 rounded-full ${
-                        action.action_type === "transfer"
-                          ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                          : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                      }`}>
-                        {action.action_type.toUpperCase()}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-slate-300 leading-normal bg-slate-950 p-2 rounded border border-slate-900 flex items-start gap-2">
-                      {action.action_type === "transfer" ? (
-                        <ArrowRightLeftIcon className="w-3.5 h-3.5 text-blue-400 flex-shrink-0 mt-0.5" />
-                      ) : (
-                        <ShoppingBagIcon className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                      )}
-                      <span>{action.details}</span>
-                    </p>
-
-                    <button
-                      onClick={() => handleApplyMitigation(action)}
-                      className="w-full py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-850 hover:text-white border border-slate-800 rounded-lg transition-colors flex items-center justify-center gap-1"
+                simResults.mitigations.map((action, idx) => {
+                  const isPO = action.action_type === "purchase_order";
+                  const activeSup = isPO ? getSelectedSupplierForAction(action) : null;
+                  
+                  return (
+                    <div 
+                      key={idx} 
+                      className="bg-slate-950/60 border border-slate-800 hover:border-slate-700 rounded-lg p-3.5 flex flex-col gap-3 transition-colors shadow-inner"
                     >
-                      <span>Draft Action Plan</span>
-                      <ArrowRightIcon className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs font-semibold text-white">{action.product_name}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">{action.product_id} @ {action.location}</span>
+                        </div>
+                        
+                        {/* Action Type Badge */}
+                        <span className={`text-[9px] font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                          action.action_type === "transfer"
+                            ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                            : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        }`}>
+                          {action.action_type.toUpperCase()}
+                        </span>
+                      </div>
+
+                      {/* Dropdown Selector for Alternative Suppliers (PO only) */}
+                      {isPO && action.alternative_suppliers && action.alternative_suppliers.length > 0 && (
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider block">
+                            Supplier Override Option
+                          </label>
+                          <select
+                            value={activeSup?.supplier_id || ""}
+                            onChange={(e) => handleSelectSupplier(action, e.target.value)}
+                            className="bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-500 transition-colors cursor-pointer w-full"
+                          >
+                            {action.alternative_suppliers.map((sup, sIdx) => (
+                              <option key={sup.supplier_id} value={sup.supplier_id}>
+                                {sIdx === 0 ? "★ [Rec] " : ""}{sup.supplier_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Supplier Metrics Detail Panel (PO only) */}
+                      {isPO && activeSup && (
+                        <div className="grid grid-cols-2 gap-2 bg-slate-950/40 border border-slate-850 rounded p-2 text-[10px] text-slate-400 font-sans">
+                          <div className="flex flex-col">
+                            <span className="text-slate-550 font-medium">Unit Cost:</span>
+                            <span className="font-mono text-slate-200">${activeSup.price.toFixed(2)}</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-slate-550 font-medium">Total Cost:</span>
+                            <span className="font-mono text-white font-semibold">${(activeSup.price * action.quantity).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-slate-550 font-medium">Lead Time / Delivery:</span>
+                            <span className="text-slate-200">{activeSup.lead_time_days} days</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-slate-550 font-medium">Risk Score:</span>
+                            <span className={`font-semibold ${
+                              activeSup.risk_score < 30 
+                                ? "text-emerald-400" 
+                                : activeSup.risk_score < 50 
+                                  ? "text-amber-400" 
+                                  : "text-rose-400"
+                            }`}>
+                              {activeSup.risk_score}/100
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <p className="text-xs text-slate-300 leading-normal bg-slate-950 p-2 rounded border border-slate-900 flex items-start gap-2">
+                        {action.action_type === "transfer" ? (
+                          <ArrowRightLeftIcon className="w-3.5 h-3.5 text-blue-400 flex-shrink-0 mt-0.5" />
+                        ) : (
+                          <ShoppingBagIcon className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                        )}
+                        <span>
+                          {isPO && activeSup
+                            ? `Place urgent replenishment order for ${action.quantity} units with ${activeSup.supplier_name} (est. arrival in ${activeSup.lead_time_days} days).`
+                            : action.details
+                          }
+                        </span>
+                      </p>
+
+                      <button
+                        onClick={() => handleApplyAction(action)}
+                        className="w-full py-1.5 text-xs font-medium bg-slate-900 hover:bg-slate-850 hover:text-white border border-slate-800 rounded-lg transition-colors flex items-center justify-center gap-1"
+                      >
+                        <span>Draft Action Plan</span>
+                        <ArrowRightIcon className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
               ) : (
                 <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
                   <div className="w-10 h-10 rounded-full bg-slate-950 flex items-center justify-center mb-3">

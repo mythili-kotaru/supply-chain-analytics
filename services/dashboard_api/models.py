@@ -162,4 +162,5 @@ class ApplyMitigationRequest(BaseModel):
     quantity: int
     source_location: Optional[str] = None
     supplier_name: Optional[str] = None
+    supplier_id: Optional[str] = None
 
