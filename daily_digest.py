@@ -2,11 +2,18 @@ import os
 import asyncio
 import datetime
 import asyncpg
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("daily_digest")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scai:scai_password@localhost:5432/supply_chain")
 
 async def generate_daily_digest():
-    print("Generating Daily Digest...")
+    logger.info("Generating Daily Digest...")
     try:
         pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
         async with pool.acquire() as conn:
@@ -124,10 +131,10 @@ async def generate_daily_digest():
         with open(report_path, "w") as f:
             f.write(html_content)
         
-        print(f"Daily Digest generated successfully at: {report_path}")
+        logger.info(f"Daily Digest generated successfully at: {report_path}")
 
     except Exception as e:
-        print(f"Error generating daily digest: {e}")
+        logger.error(f"Error generating daily digest: {e}", exc_info=True)
 
 if __name__ == "__main__":
     asyncio.run(generate_daily_digest())
