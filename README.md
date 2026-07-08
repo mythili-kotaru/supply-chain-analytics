@@ -162,9 +162,10 @@ The seed data is designed to create realistic conditions for all three agent pat
 |---|---|---|
 | Day 1 | ✅ Done | Full project scaffold: Docker Compose, PostgreSQL schema + seeds, FastMCP server (4 tools + RBAC), LangGraph supervisor + HITL, A2A allocation + replenishment agents, Next.js ops dashboard |
 | Day 2 | 🔜 Next | FastAPI Dashboard API — real endpoints replace mock data: `GET /proposals`, `GET /inventory/alerts`, `POST /proposals/{id}/approve` |
-| Day 3 | 📅 Planned | APScheduler monitoring loop — 60s inventory scan, 5min MAPE scan, auto-generate proposals on violation |
-| Day 4 | 📅 Planned | Wire LangGraph to approval — `POST approve` resumes the checkpointed graph, triggers A2A execution |
-| Day 5 | 📅 Planned | LangSmith tracing — instrument all nodes, surface trace in dashboard pipeline view |
+| Day 3 | ✅ Done | APScheduler monitoring loop — 60s inventory scan, 5min MAPE scan, auto-generate proposals on violation (`scheduler.py` & `daily_digest.py`) |
+| Day 4 | ✅ Done | Chaos Simulator (`chaos_simulator.py`) and Proactive Drift Agent (`drift_agent.py`) implemented for continuous ops stress-testing |
+| Day 5 | 📅 Planned | Wire LangGraph to approval — `POST approve` resumes the checkpointed graph, triggers A2A execution |
+| Day 6 | 📅 Planned | LangSmith tracing — instrument all nodes, surface trace in dashboard pipeline view |
 
 ### Future Enhancements
 
