@@ -28,6 +28,17 @@ async def check_inventory_violations():
             
             for row in rows:
                 product_id = row['product_id']
+                
+                # Check if there is already a pending allocation task for this product
+                pending_task = await conn.fetchval("""
+                    SELECT 1 FROM allocation_tasks 
+                    WHERE product_id = $1 AND status = 'pending' LIMIT 1
+                """, product_id)
+                
+                if pending_task:
+                    logger.info(f"Skipping inventory violation for {product_id} as a task is already pending.")
+                    continue
+
                 logger.warning(f"Inventory violation detected for {product_id} at {row['location']} (Stock: {row['stock_level']}, Reorder: {row['reorder_point']})")
                 
                 # Trigger supervisor
@@ -59,6 +70,17 @@ async def check_mape_violations():
             
             for row in rows:
                 product_id = row['product_id']
+                
+                # Check if there is already a pending tuning proposal for this product
+                pending_tuning = await conn.fetchval("""
+                    SELECT 1 FROM hyperparameter_tuning_log 
+                    WHERE product_id = $1 AND status = 'proposed' LIMIT 1
+                """, product_id)
+                
+                if pending_tuning:
+                    logger.info(f"Skipping MAPE violation for {product_id} as a tuning proposal is already pending.")
+                    continue
+
                 logger.warning(f"MAPE violation detected for {product_id} (MAPE: {row['mape']})")
                 
                 # Trigger supervisor
