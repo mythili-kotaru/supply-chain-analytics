@@ -1,0 +1,9 @@
+# Configuration for Supply Chain AI background services
+
+# Intervals for scheduler jobs (can be overridden via environment variables)
+# Values are in seconds for inventory scan and minutes for MAPE scan.
+
+inventory_interval_seconds: 60
+mape_interval_minutes: 5
+
+# Additional settings can be added here, e.g., enable_chaos_simulator: true
