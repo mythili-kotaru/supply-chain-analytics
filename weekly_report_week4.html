@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weekly Report – Week 4</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      color: #222;
+      max-width: 680px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+
+    h1 {
+      text-align: center;
+      color: #2563eb;
+      font-size: 22px;
+      margin-bottom: 24px;
+    }
+
+    h2 {
+      color: #2563eb;
+      font-size: 14px;
+      margin: 24px 0 6px;
+      border-bottom: none;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+
+    /* Employee details table */
+    .details-table td {
+      border: 1px solid #ccc;
+      padding: 6px 10px;
+    }
+    .details-table td:first-child {
+      font-weight: bold;
+      width: 140px;
+      background: #f9f9f9;
+    }
+
+    /* Tasks list */
+    .tasks-table td {
+      border: 1px solid #ccc;
+      padding: 7px 10px;
+      vertical-align: top;
+    }
+    .tasks-table td.bullet {
+      width: 14px;
+      text-align: center;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Weekly Report</h1>
+
+  <!-- Employee Details -->
+  <h2>Employee Details</h2>
+  <table class="details-table">
+    <tr><td>Employee Name</td><td>Mythili Kotaru</td></tr>
+    <tr><td>Email</td><td>mythili@hashclicksolutions.com</td></tr>
+    <tr><td>Week</td><td>Week 4</td></tr>
+    <tr><td>Submission Date</td><td>July 10, 2026</td></tr>
+  </table>
+
+  <!-- Tasks Completed -->
+  <h2>Tasks Completed</h2>
+  <table class="tasks-table">
+    <tr>
+      <td class="bullet">•</td>
+      <td>Built the <strong>Continuous Ops Monitoring Loop</strong> — designed and deployed a robust <code>APScheduler</code>-backed background monitoring loop (<code>scheduler.py</code>) that operates continuously. It scans the PostgreSQL inventory every 60 seconds to detect critically low stock (below the reorder point). Simultaneously, it scans the <code>forecast_metrics</code> table every 5 minutes to detect forecasting model accuracy degradation (MAPE > 15%). When violations are identified, it automatically delegates a mitigation task to the LangGraph supervisor.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Engineered the <strong>Daily Ops Digest Reporting</strong> — created an automated daily reporting script (<code>daily_digest.py</code>) that aggregates the last 24 hours of autonomous AI actions. It queries the <code>allocation_tasks</code> and <code>hyperparameter_tuning_log</code> tables to generate a comprehensive HTML report for human oversight. Upgraded the script to utilize Python's standard <code>logging</code> module for production-grade output formatting instead of basic print statements.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Implemented the <strong>Chaos Simulator & Drift Agent</strong> — introduced Chaos Engineering principles by building a <code>chaos_simulator.py</code> service that randomly injects demand shocks (stock drops) and supplier delays into the database, continuously stress-testing the AI agents' reaction times. Additionally, implemented a proactive <code>drift_agent.py</code> that analyzes a 7-day rolling average of MAPE to catch slow model degradation before it breaches the 15% threshold.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Developed <strong>Duplicate Proposal Prevention</strong> — implemented robust state-checking logic in the scheduler. Before triggering a LangGraph workflow, the system now queries the database for existing <code>pending</code> or <code>proposed</code> statuses for that specific SKU. This critical enhancement prevents the 60-second loop from generating massive backlogs of duplicate workflows when an item is already in the Human-In-The-Loop (HITL) approval queue.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td>Finalized <strong>Configuration Management & Documentation</strong> — centralized all background service intervals (e.g., 60s inventory scan, 5m MAPE scan) into a <code>config.yaml</code> file, separating business logic from environment configuration. Finalized all documentation for the week by updating the <code>README.md</code> progress tracker to mark the new background agents as fully deployed and operational.</td>
+    </tr>
+  </table>
+
+  <!-- Skills Learned -->
+  <h2>Skills Learned</h2>
+  <table class="tasks-table">
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Background Task Scheduling:</strong> Leveraging <code>APScheduler</code> to run asynchronous Python jobs (60s loops, 5m loops, daily loops) independent of the main FastAPI server.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Chaos Engineering:</strong> Building simulated test environments to evaluate the real-time resilience and adaptability of automated supply chain agents.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Robust State Management:</strong> Preventing duplicate event triggers by implementing state checks against PostgreSQL tables before invoking LangGraph pipelines.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Configuration Extraction:</strong> Moving magic numbers and hardcoded intervals into standardized <code>config.yaml</code> files for cleaner architecture.</td>
+    </tr>
+  </table>
+
+  <!-- Challenges -->
+  <h2>Challenges</h2>
+  <table class="tasks-table">
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Duplicate Proposal Backlogs:</strong> The 60-second background scheduler was overly eager. When it detected an inventory breach, it triggered the agent, which then correctly paused in a Human-In-The-Loop (HITL) state waiting for admin approval. However, 60 seconds later, the scheduler detected the same breach and triggered a duplicate workflow, creating a rapidly growing backlog of identical proposals.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Hardcoded Magic Numbers:</strong> The background agents were initially built with hardcoded scheduling intervals and configuration variables spread across multiple scripts, which made adjustments difficult and increased the risk of deployment errors.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Inconsistent Background Output:</strong> Some background scripts used standard <code>print</code> statements while others used proper logging, making it difficult to trace events systematically in the console when multiple agents were running simultaneously.</td>
+    </tr>
+  </table>
+
+  <!-- Solutions -->
+  <h2>Solutions</h2>
+  <table class="tasks-table">
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Pending State DB Check:</strong> Added a <code>pending</code> status lock check in PostgreSQL before invoking the LangGraph pipelines. The scheduler now skips triggering new workflows if a pending task for that SKU already exists, effectively solving the duplicate backlog issue.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Centralized Configuration:</strong> Abstracted all environment configurations and intervals out of the Python scripts into a single <code>config.yaml</code> file to ensure clean, maintainable code architecture.</td>
+    </tr>
+    <tr>
+      <td class="bullet">•</td>
+      <td><strong>Standardized Logging:</strong> Refactored <code>daily_digest.py</code> to use Python's built-in <code>logging</code> module, ensuring all background agents output consistent, timestamped logs with appropriate severity levels.</td>
+    </tr>
+  </table>
+
+</body>
+</html>
