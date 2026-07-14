@@ -5,6 +5,7 @@ import asyncpg
 import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from agents.supervisor import run_supervisor
+from notifier import send_alert
 
 # Configure logging
 logging.basicConfig(
@@ -40,7 +41,9 @@ async def check_inventory_violations():
                     logger.info(f"Skipping inventory violation for {product_id} as a task is already pending.")
                     continue
 
-                logger.warning(f"Inventory violation detected for {product_id} at {row['location']} (Stock: {row['stock_level']}, Reorder: {row['reorder_point']})")
+                alert_msg = f"Inventory breach for {product_id} at {row['location']} (Stock: {row['stock_level']}, Reorder: {row['reorder_point']})"
+                logger.warning(alert_msg)
+                send_alert(alert_msg)
                 
                 # Trigger supervisor
                 query = f"The stock for {product_id} is critically low. Please allocate or replenish it."
@@ -82,7 +85,9 @@ async def check_mape_violations():
                     logger.info(f"Skipping MAPE violation for {product_id} as a tuning proposal is already pending.")
                     continue
 
-                logger.warning(f"MAPE violation detected for {product_id} (MAPE: {row['mape']})")
+                alert_msg = f"MAPE violation detected for {product_id} (MAPE: {row['mape'] * 100:.1f}%)"
+                logger.warning(alert_msg)
+                send_alert(alert_msg)
                 
                 # Trigger supervisor
                 query = f"Investigate the high forecast error (MAPE) for {product_id} and tune the model hyperparameters."
