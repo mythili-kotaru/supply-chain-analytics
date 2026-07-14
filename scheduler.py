@@ -9,7 +9,7 @@ from agents.supervisor import run_supervisor
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s [%(levelname)s] [%(filename)s:%(lineno)d] %(name)s: %(message)s"
 )
 logger = logging.getLogger("scheduler")
 
