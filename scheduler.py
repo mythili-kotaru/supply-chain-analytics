@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import asyncpg
+import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from agents.supervisor import run_supervisor
 
@@ -96,15 +97,31 @@ async def check_mape_violations():
     except Exception as e:
         logger.error(f"Error checking MAPE: {e}", exc_info=True)
 
+def load_config():
+    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    try:
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.error(f"Failed to load config.yaml, using defaults: {e}")
+        return {}
+
 if __name__ == "__main__":
     logger.info("Starting Supply Chain AI Scheduler...")
+    
+    config = load_config()
+    inv_interval = config.get("inventory_interval_seconds", 60)
+    mape_interval = config.get("mape_interval_minutes", 5)
+    
+    logger.info(f"Loaded config: Inventory scan every {inv_interval}s, MAPE scan every {mape_interval}m.")
+    
     scheduler = AsyncIOScheduler()
     
-    # Inventory Job (every 60 seconds)
-    scheduler.add_job(check_inventory_violations, 'interval', seconds=60, id='inventory_scan')
+    # Inventory Job
+    scheduler.add_job(check_inventory_violations, 'interval', seconds=inv_interval, id='inventory_scan')
     
-    # MAPE Job (every 5 minutes)
-    scheduler.add_job(check_mape_violations, 'interval', minutes=5, id='mape_scan')
+    # MAPE Job
+    scheduler.add_job(check_mape_violations, 'interval', minutes=mape_interval, id='mape_scan')
     
     scheduler.start()
     
