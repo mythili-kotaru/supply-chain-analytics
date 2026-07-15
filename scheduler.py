@@ -45,15 +45,18 @@ async def check_inventory_violations():
                 logger.warning(alert_msg)
                 send_alert(alert_msg)
                 
-                # Trigger supervisor
-                query = f"The stock for {product_id} is critically low. Please allocate or replenish it."
-                logger.info(f"Triggering supervisor for {product_id}: {query}")
-                
-                # We iterate through the stream to ensure it runs to completion (up to HITL interrupt)
-                async for event in run_supervisor(user_query=query, user_role="admin"):
-                    pass 
-                
-                logger.info(f"Supervisor successfully triggered and paused at HITL for {product_id}.")
+                try:
+                    # Trigger supervisor
+                    query = f"The stock for {product_id} is critically low. Please allocate or replenish it."
+                    logger.info(f"Triggering supervisor for {product_id}: {query}")
+                    
+                    # We iterate through the stream to ensure it runs to completion (up to HITL interrupt)
+                    async for event in run_supervisor(user_query=query, user_role="admin"):
+                        pass 
+                    
+                    logger.info(f"Supervisor successfully triggered and paused at HITL for {product_id}.")
+                except Exception as e:
+                    logger.error(f"Failed to run supervisor for product {product_id}: {e}", exc_info=True)
                 
         await pool.close()
     except Exception as e:
@@ -89,14 +92,17 @@ async def check_mape_violations():
                 logger.warning(alert_msg)
                 send_alert(alert_msg)
                 
-                # Trigger supervisor
-                query = f"Investigate the high forecast error (MAPE) for {product_id} and tune the model hyperparameters."
-                logger.info(f"Triggering supervisor for {product_id}: {query}")
-                
-                async for event in run_supervisor(user_query=query, user_role="admin"):
-                    pass 
-                
-                logger.info(f"Supervisor successfully triggered and paused at HITL for {product_id}.")
+                try:
+                    # Trigger supervisor
+                    query = f"Investigate the high forecast error (MAPE) for {product_id} and tune the model hyperparameters."
+                    logger.info(f"Triggering supervisor for {product_id}: {query}")
+                    
+                    async for event in run_supervisor(user_query=query, user_role="admin"):
+                        pass 
+                    
+                    logger.info(f"Supervisor successfully triggered and paused at HITL for {product_id}.")
+                except Exception as e:
+                    logger.error(f"Failed to run supervisor for model {product_id}: {e}", exc_info=True)
                 
         await pool.close()
     except Exception as e:
