@@ -119,6 +119,7 @@ def load_config():
 
 if __name__ == "__main__":
     logger.info("Starting Supply Chain AI Scheduler...")
+    send_alert("🟢 *Supply Chain AI Scheduler is online and actively monitoring.*")
     
     config = load_config()
     inv_interval = config.get("inventory_interval_seconds", 60)
