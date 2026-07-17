@@ -4,6 +4,7 @@ import random
 import logging
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from notifier import send_alert
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +32,9 @@ async def inject_demand_shock():
                 new_stock = max(0, target['reorder_point'] - random.randint(1, 50))
                 
                 await conn.execute("UPDATE inventory SET stock_level = $1 WHERE id = $2", new_stock, target['id'])
-                logger.warning(f"Chaos Monkey Strike! 🌪️ Dropped stock for {target['product_id']} from {target['stock_level']} to {new_stock} (below reorder point {target['reorder_point']})")
+                msg = f"Chaos Monkey Strike! 🌪️ Dropped stock for {target['product_id']} from {target['stock_level']} to {new_stock} (below reorder point {target['reorder_point']})"
+                logger.warning(msg)
+                send_alert(msg)
             else:
                 logger.info("Chaos Monkey: All items are already critical or below reorder point. No shock injected.")
                 
@@ -55,7 +58,9 @@ async def inject_supplier_delay():
                 new_lead_time = target['lead_time_days'] + delay_days
                 
                 await conn.execute("UPDATE suppliers SET lead_time_days = $1 WHERE supplier_id = $2", new_lead_time, target['supplier_id'])
-                logger.warning(f"Chaos Monkey Strike! 🌪️ Delayed supplier {target['supplier_name']} by {delay_days} days. New lead time: {new_lead_time} days.")
+                msg = f"Chaos Monkey Strike! 🌪️ Delayed supplier {target['supplier_name']} by {delay_days} days. New lead time: {new_lead_time} days."
+                logger.warning(msg)
+                send_alert(msg)
             
         await pool.close()
     except Exception as e:
@@ -63,6 +68,7 @@ async def inject_supplier_delay():
 
 if __name__ == "__main__":
     logger.info("Starting Supply Chain AI Chaos Simulator...")
+    send_alert("⚠️ *Chaos Simulator is online and active. Prepare for automated disruptions.*")
     scheduler = AsyncIOScheduler()
     
     # Inject a demand shock randomly every 1 to 4 hours
