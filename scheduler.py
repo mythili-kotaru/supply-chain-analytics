@@ -6,6 +6,7 @@ import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from agents.supervisor import run_supervisor
 from notifier import send_alert
+from supplier_evaluator import evaluate_supplier_performance
 
 # Configure logging
 logging.basicConfig(
@@ -124,8 +125,9 @@ if __name__ == "__main__":
     config = load_config()
     inv_interval = config.get("inventory_interval_seconds", 60)
     mape_interval = config.get("mape_interval_minutes", 5)
+    supplier_interval = config.get("supplier_evaluation_interval_minutes", 60)
     
-    logger.info(f"Loaded config: Inventory scan every {inv_interval}s, MAPE scan every {mape_interval}m.")
+    logger.info(f"Loaded config: Inventory scan every {inv_interval}s, MAPE scan every {mape_interval}m, Supplier eval every {supplier_interval}m.")
     
     scheduler = AsyncIOScheduler()
     
@@ -134,6 +136,9 @@ if __name__ == "__main__":
     
     # MAPE Job
     scheduler.add_job(check_mape_violations, 'interval', minutes=mape_interval, id='mape_scan')
+    
+    # Supplier Evaluation Job
+    scheduler.add_job(evaluate_supplier_performance, 'interval', minutes=supplier_interval, id='supplier_evaluation')
     
     scheduler.start()
     
