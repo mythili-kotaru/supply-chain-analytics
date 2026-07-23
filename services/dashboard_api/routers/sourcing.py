@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 import asyncpg
 from typing import Optional
 from pydantic import BaseModel
+from datetime import datetime
 
 from database import get_db
 
@@ -111,3 +112,50 @@ async def get_supplier_scorecard(supplier_id: str, db: asyncpg.Pool = Depends(ge
         if s.supplier_id == supplier_id:
             return s
     raise HTTPException(status_code=404, detail=f"Supplier {supplier_id} not found.")
+
+class SupplierPerformanceLogItem(BaseModel):
+    log_id: int
+    supplier_id: str
+    evaluation_date: datetime
+    avg_actual_lead_time: Optional[float] = None
+    late_delivery_rate: Optional[float] = None
+    defect_rate: Optional[float] = None
+    status: str
+
+@router.get("/sourcing/scorecard/{supplier_id}/history", response_model=list[SupplierPerformanceLogItem])
+async def get_supplier_performance_history(supplier_id: str, db: asyncpg.Pool = Depends(get_db)):
+    """
+    Get the historical performance evaluations for a single supplier.
+    """
+    query = """
+        SELECT 
+            log_id,
+            supplier_id,
+            evaluation_date,
+            avg_actual_lead_time,
+            late_delivery_rate,
+            defect_rate,
+            status
+        FROM supplier_performance_log
+        WHERE supplier_id = $1
+        ORDER BY evaluation_date DESC
+        LIMIT 50
+    """
+    try:
+        rows = await db.fetch(query, supplier_id)
+        results = []
+        for r in rows:
+            results.append(
+                SupplierPerformanceLogItem(
+                    log_id=r["log_id"],
+                    supplier_id=r["supplier_id"],
+                    evaluation_date=r["evaluation_date"],
+                    avg_actual_lead_time=float(r["avg_actual_lead_time"]) if r["avg_actual_lead_time"] is not None else None,
+                    late_delivery_rate=float(r["late_delivery_rate"]) if r["late_delivery_rate"] is not None else None,
+                    defect_rate=float(r["defect_rate"]) if r["defect_rate"] is not None else None,
+                    status=r["status"]
+                )
+            )
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sourcing history database query failed: {str(e)}")
