@@ -34,7 +34,7 @@ from monitor import (
     FORECAST_CHECK_INTERVAL,
     ANOMALY_CHECK_INTERVAL,
 )
-from routers import inventory, forecast, proposals, stats, anomaly, analytics, charts, auth, sourcing, simulation
+from routers import inventory, forecast, proposals, stats, anomaly, analytics, charts, auth, sourcing, simulation, chaos
 
 logging.basicConfig(
     level=logging.INFO,
@@ -173,6 +173,7 @@ app.include_router(analytics.router, prefix=PREFIX + "/analytics", tags=["analyt
 app.include_router(charts.router,    prefix=PREFIX, tags=["charts"], dependencies=[Depends(get_current_user)])
 app.include_router(sourcing.router,  prefix=PREFIX, tags=["sourcing"], dependencies=[Depends(get_current_user)])
 app.include_router(simulation.router, prefix=PREFIX, tags=["simulation"], dependencies=[Depends(get_current_user)])
+app.include_router(chaos.router,     prefix=PREFIX, tags=["chaos"], dependencies=[Depends(get_current_user)])
 
 
 
