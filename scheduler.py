@@ -7,6 +7,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from agents.supervisor import run_supervisor
 from notifier import send_alert
 from supplier_evaluator import evaluate_supplier_performance
+from drift_agent import analyze_weekly_drift
+from daily_digest import generate_daily_digest
 
 # Configure logging
 logging.basicConfig(
@@ -126,8 +128,10 @@ if __name__ == "__main__":
     inv_interval = config.get("inventory_interval_seconds", 60)
     mape_interval = config.get("mape_interval_minutes", 5)
     supplier_interval = config.get("supplier_evaluation_interval_minutes", 60)
+    drift_interval = config.get("drift_agent_interval_hours", 24)
+    digest_interval = config.get("daily_digest_interval_hours", 24)
     
-    logger.info(f"Loaded config: Inventory scan every {inv_interval}s, MAPE scan every {mape_interval}m, Supplier eval every {supplier_interval}m.")
+    logger.info(f"Loaded config: Inventory scan every {inv_interval}s, MAPE scan every {mape_interval}m, Supplier eval every {supplier_interval}m, Drift agent every {drift_interval}h, Daily digest every {digest_interval}h.")
     
     scheduler = AsyncIOScheduler()
     
@@ -139,6 +143,12 @@ if __name__ == "__main__":
     
     # Supplier Evaluation Job
     scheduler.add_job(evaluate_supplier_performance, 'interval', minutes=supplier_interval, id='supplier_evaluation')
+    
+    # Drift Agent Job
+    scheduler.add_job(analyze_weekly_drift, 'interval', hours=drift_interval, id='drift_agent_scan')
+    
+    # Daily Digest Job
+    scheduler.add_job(generate_daily_digest, 'interval', hours=digest_interval, id='daily_digest_generation')
     
     scheduler.start()
     

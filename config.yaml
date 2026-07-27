@@ -6,5 +6,7 @@
 inventory_interval_seconds: 60
 mape_interval_minutes: 5
 supplier_evaluation_interval_minutes: 60
+drift_agent_interval_hours: 24
+daily_digest_interval_hours: 24
 
 # Additional settings can be added here, e.g., enable_chaos_simulator: true
