@@ -141,6 +141,7 @@ services:
     volumes:
       - ./services/dashboard_api:/app   # hot reload in dev
       - ./agents:/app/agents              # shared agents package from repo root
+      - ./data:/app/data                  # mount data folder for daily digests
 
   # ─────────────────────────────────────────────
   # LANGGRAPH AGENT SERVICE (Day 4)
