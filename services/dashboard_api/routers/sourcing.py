@@ -159,3 +159,17 @@ async def get_supplier_performance_history(supplier_id: str, db: asyncpg.Pool = 
         return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sourcing history database query failed: {str(e)}")
+
+@router.get("/sourcing/risky", response_model=list[SupplierScorecardItem])
+async def get_risky_suppliers(limit: int = 5, db: asyncpg.Pool = Depends(get_db)):
+    """
+    Get the top N highest risk suppliers based on defect rate, on-time delivery, and lead time drift.
+    """
+    try:
+        scorecard = await get_sourcing_scorecard(db)
+        # Sort descending by risk score
+        risky = sorted(scorecard, key=lambda x: x.risk_score, reverse=True)
+        return risky[:limit]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch risky suppliers: {str(e)}")
+
