@@ -135,6 +135,7 @@ class DashboardStats(BaseModel):
     approved_today: int
     po_value_pending: float
     avg_mape: float
+    total_suppliers: int
     services: list[ServiceHealth]
 
 

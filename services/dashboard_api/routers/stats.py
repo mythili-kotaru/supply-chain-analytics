@@ -47,6 +47,7 @@ async def get_stats(request: Request, db: asyncpg.Pool = Depends(get_db)):
         approved_row,
         po_value_row,
         mape_row,
+        supplier_row,
         *service_results,
     ) = await asyncio.gather(
         db.fetchrow("SELECT COUNT(*) AS n FROM inventory WHERE stock_level <= reorder_point"),
@@ -58,6 +59,7 @@ async def get_stats(request: Request, db: asyncpg.Pool = Depends(get_db)):
             WHERE status = 'pending' AND type = 'replenishment'
         """),
         db.fetchrow("SELECT ROUND((AVG(mape) * 100)::numeric, 2) AS avg FROM forecast_metrics"),
+        db.fetchrow("SELECT COUNT(*) AS n FROM suppliers"),
         *[_check_service(name, url) for name, url in SERVICES.items()],
     )
 
@@ -72,5 +74,6 @@ async def get_stats(request: Request, db: asyncpg.Pool = Depends(get_db)):
         approved_today=approved_row["n"],
         po_value_pending=float(po_value_row["total"]),
         avg_mape=float(mape_row["avg"] or 0),
+        total_suppliers=supplier_row["n"],
         services=service_results,
     )
