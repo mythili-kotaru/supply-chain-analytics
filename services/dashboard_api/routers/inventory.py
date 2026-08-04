@@ -109,3 +109,47 @@ async def get_inventory_all(db: asyncpg.Pool = Depends(get_db)):
         )
         for row in rows
     ]
+
+@router.get("/inventory/critical", response_model=list[InventoryAlert])
+async def get_inventory_critical(db: asyncpg.Pool = Depends(get_db)):
+    """
+    Returns only CRITICAL inventory rows (stock level <= 50% of reorder point).
+    Used for the immediate attention widget on the dashboard.
+    """
+    rows = await db.fetch("""
+        SELECT
+            i.product_id,
+            p.product_name,
+            p.category,
+            i.location,
+            i.stock_level,
+            i.reorder_point,
+            i.max_capacity,
+            ROUND(
+                (i.stock_level::numeric / NULLIF(i.max_capacity, 0)) * 100,
+                1
+            )                                               AS capacity_pct,
+            'CRITICAL'                                      AS status,
+            i.last_updated::text                            AS last_updated,
+            i.reorder_point - i.stock_level                AS buffer_units
+        FROM inventory i
+        JOIN products p ON p.product_id = i.product_id
+        WHERE i.stock_level <= i.reorder_point * 0.5
+        ORDER BY buffer_units DESC
+    """)
+
+    return [
+        InventoryAlert(
+            product_id=row["product_id"],
+            product_name=row["product_name"],
+            category=row["category"],
+            location=row["location"],
+            stock_level=row["stock_level"],
+            reorder_point=row["reorder_point"],
+            max_capacity=row["max_capacity"],
+            capacity_pct=float(row["capacity_pct"] or 0),
+            status=row["status"],
+            last_updated=row["last_updated"],
+        )
+        for row in rows
+    ]
