@@ -73,6 +73,40 @@ async def get_forecast_alerts(db: asyncpg.Pool = Depends(get_db)):
         for row in rows
     ]
 
+@router.get("/forecast/healthy", response_model=list[ForecastAlert])
+async def get_healthy_forecasts(db: asyncpg.Pool = Depends(get_db)):
+    """
+    Returns forecast_metrics rows where MAPE is within the acceptable threshold (<= 15%).
+    Useful for the 'Stable Forecasts' view.
+    """
+    rows = await db.fetch("""
+        SELECT
+            fm.product_id,
+            p.product_name,
+            fm.model_name,
+            (fm.mape * 100)::numeric(6,2) AS mape_pct,
+            fm.run_date::text             AS run_date,
+            fm.notes,
+            fm.hyperparameters
+        FROM forecast_metrics fm
+        JOIN products p ON p.product_id = fm.product_id
+        WHERE fm.mape * 100 <= $1
+        ORDER BY fm.mape ASC
+    """, MAPE_THRESHOLD)
+
+    return [
+        ForecastAlert(
+            product_id=row["product_id"],
+            product_name=row["product_name"],
+            model_name=row["model_name"],
+            mape_pct=float(row["mape_pct"]),
+            run_date=row["run_date"],
+            notes=row["notes"] or "",
+            hyperparameters=(json.loads(row["hyperparameters"]) if isinstance(row["hyperparameters"], str) else dict(row["hyperparameters"])) if row["hyperparameters"] else {},
+        )
+        for row in rows
+    ]
+
 
 @router.get("/forecast/drift")
 async def get_drift_summary(db: asyncpg.Pool = Depends(get_db)):
