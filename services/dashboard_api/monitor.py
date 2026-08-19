@@ -110,6 +110,15 @@ async def trigger_langgraph(
                 f"thread_id={thread_id} nodes={nodes}"
             )
             logger.info(f"[langgraph] Agent summary: {summary[:200]}")
+            
+            # Update the proposal with the thread_id
+            if thread_id:
+                conn = await asyncpg.connect(DATABASE_URL)
+                try:
+                    await conn.execute("UPDATE proposals SET thread_id = $1 WHERE id = $2", thread_id, proposal_id)
+                finally:
+                    await conn.close()
+                    
             return thread_id
     except httpx.ConnectError:
         logger.warning(
@@ -129,6 +138,11 @@ MAPE_THRESHOLD = 0.15          # 15% — matches ForecastPanel threshold marker
 INVENTORY_CHECK_INTERVAL  = 60    # seconds
 FORECAST_CHECK_INTERVAL   = 300   # seconds (5 min)
 ANOMALY_CHECK_INTERVAL    = 300   # seconds (5 min) — Day 9 anomaly detection
+SUPPLIER_CHECK_INTERVAL   = 3600  # seconds (60 min)
+DRIFT_CHECK_INTERVAL      = 86400 # seconds (24 hours)
+DIGEST_CHECK_INTERVAL     = 86400 # seconds (24 hours)
+RETRY_CHECK_INTERVAL      = 300   # seconds (5 min)
+
 
 
 # ── Agent reasoning templates ─────────────────────────────────────────────────
@@ -473,6 +487,96 @@ async def anomaly_monitor(_pool=None) -> None:
             logger.info("[anomaly] Anomaly scan: no new anomalies detected.")
     except Exception as e:
         logger.error(f"[anomaly] Scan failed: {e}", exc_info=True)
+
+
+# ── Core job: supplier evaluation monitor ─────────────────────────────────────
+
+async def supplier_evaluation_monitor(_pool=None) -> None:
+    import sys, pathlib
+    _here = pathlib.Path(__file__).resolve().parent
+    for candidate in [_here] + list(_here.parents):
+        if (candidate / "supplier_evaluator.py").is_file():
+            if str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
+            break
+    try:
+        from supplier_evaluator import evaluate_supplier_performance
+        await evaluate_supplier_performance()
+    except Exception as e:
+        logger.error(f"[monitor] Supplier evaluation failed: {e}", exc_info=True)
+
+
+# ── Core job: drift agent monitor ─────────────────────────────────────────────
+
+async def drift_agent_monitor(_pool=None) -> None:
+    import sys, pathlib
+    _here = pathlib.Path(__file__).resolve().parent
+    for candidate in [_here] + list(_here.parents):
+        if (candidate / "drift_agent.py").is_file():
+            if str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
+            break
+    try:
+        from drift_agent import analyze_weekly_drift
+        await analyze_weekly_drift()
+    except Exception as e:
+        logger.error(f"[monitor] Drift analysis failed: {e}", exc_info=True)
+
+
+# ── Core job: daily digest monitor ────────────────────────────────────────────
+
+async def daily_digest_monitor(_pool=None) -> None:
+    import sys, pathlib
+    _here = pathlib.Path(__file__).resolve().parent
+    for candidate in [_here] + list(_here.parents):
+        if (candidate / "daily_digest.py").is_file():
+            if str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
+            break
+    try:
+        from daily_digest import generate_daily_digest
+        await generate_daily_digest()
+    except Exception as e:
+        logger.error(f"[monitor] Daily digest generation failed: {e}", exc_info=True)
+
+
+# ── Core job: retry stalled proposals ─────────────────────────────────────────
+
+async def retry_stalled_proposals(_pool=None) -> None:
+    """
+    Checks for proposals stuck in 'pending' status without a valid thread_id.
+    This can happen if langgraph_agent was down when the proposal was created.
+    """
+    logger.info("[monitor] Running stalled proposals retry scan...")
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        stalled = await conn.fetch("""
+            SELECT id, type, trigger_product_id, trigger_product_name, trigger_location, severity, trigger_metric, trigger_current_value, trigger_threshold
+            FROM proposals
+            WHERE status = 'pending' AND thread_id IS NULL
+        """)
+        
+        if not stalled:
+            return
+            
+        logger.info(f"[monitor] Retry scan: found {len(stalled)} stalled proposals. Attempting to trigger langgraph...")
+        
+        for row in stalled:
+            await trigger_langgraph(
+                proposal_id=row['id'],
+                proposal_type=row['type'],
+                product_id=row['trigger_product_id'],
+                product_name=row['trigger_product_name'],
+                location=row['trigger_location'],
+                severity=row['severity'],
+                trigger_metric=row['trigger_metric'],
+                trigger_value=float(row['trigger_current_value']),
+                trigger_threshold=float(row['trigger_threshold']),
+            )
+    except Exception as e:
+        logger.error(f"[monitor] Stalled proposals retry failed: {e}", exc_info=True)
+    finally:
+        await conn.close()
 
 
 # ── APScheduler wrappers ──────────────────────────────────────────────────────

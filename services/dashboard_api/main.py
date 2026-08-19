@@ -29,10 +29,18 @@ from monitor import (
     inventory_monitor,
     forecast_monitor,
     anomaly_monitor,
+    supplier_evaluation_monitor,
+    drift_agent_monitor,
+    daily_digest_monitor,
+    retry_stalled_proposals,
     make_sync_job,
     INVENTORY_CHECK_INTERVAL,
     FORECAST_CHECK_INTERVAL,
     ANOMALY_CHECK_INTERVAL,
+    SUPPLIER_CHECK_INTERVAL,
+    DRIFT_CHECK_INTERVAL,
+    DIGEST_CHECK_INTERVAL,
+    RETRY_CHECK_INTERVAL,
 )
 from routers import inventory, forecast, proposals, stats, anomaly, analytics, charts, auth, sourcing, simulation, chaos, reports, settings
 
@@ -111,13 +119,53 @@ async def lifespan(app: FastAPI):
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=15),
     )
 
+    scheduler.add_job(
+        make_sync_job(retry_stalled_proposals),
+        trigger="interval",
+        seconds=RETRY_CHECK_INTERVAL,
+        id="retry_stalled_proposals",
+        name="Stalled proposals retry scanner",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
+    )
+
+    scheduler.add_job(
+        make_sync_job(supplier_evaluation_monitor),
+        trigger="interval",
+        seconds=SUPPLIER_CHECK_INTERVAL,
+        id="supplier_evaluation",
+        name="Supplier performance evaluator",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=25),
+    )
+
+    scheduler.add_job(
+        make_sync_job(drift_agent_monitor),
+        trigger="interval",
+        seconds=DRIFT_CHECK_INTERVAL,
+        id="drift_agent_scan",
+        name="Drift agent analysis",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+    )
+
+    scheduler.add_job(
+        make_sync_job(daily_digest_monitor),
+        trigger="interval",
+        seconds=DIGEST_CHECK_INTERVAL,
+        id="daily_digest_generation",
+        name="Daily digest generator",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=35),
+    )
+
     scheduler.start()
     app.state.scheduler = scheduler
     logger.info(
         f"✓ APScheduler started — "
-        f"inventory scan every {INVENTORY_CHECK_INTERVAL}s, "
-        f"MAPE scan every {FORECAST_CHECK_INTERVAL}s, "
-        f"anomaly scan every {ANOMALY_CHECK_INTERVAL}s"
+        f"inventory ({INVENTORY_CHECK_INTERVAL}s), "
+        f"MAPE ({FORECAST_CHECK_INTERVAL}s), "
+        f"anomaly ({ANOMALY_CHECK_INTERVAL}s), "
+        f"retry ({RETRY_CHECK_INTERVAL}s), "
+        f"supplier ({SUPPLIER_CHECK_INTERVAL}s), "
+        f"drift ({DRIFT_CHECK_INTERVAL}s), "
+        f"digest ({DIGEST_CHECK_INTERVAL}s)"
     )
 
     yield  # ← FastAPI serves requests between startup and shutdown
